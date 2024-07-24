@@ -1,25 +1,15 @@
-use ast::{Equation, Prop};
+use cc_lemma::ast::{Equation, Prop};
 use colored::Colorize;
 use std::fs::*;
 use std::io::{Result, Write};
 use std::time::{Duration, Instant};
 
-pub mod analysis;
-pub mod ast;
-pub mod config;
-pub mod egraph;
-pub mod explain;
-pub mod goal;
-mod goal_graph;
-pub mod parser;
-pub mod utils;
+use cc_lemma::config::{ARGS, CONFIG};
+use cc_lemma::explain::explain_top;
+use cc_lemma::goal::*;
+use cc_lemma::parser::*;
 
-use config::{ARGS, CONFIG};
-use explain::explain_top;
-use goal::*;
-use parser::*;
-
-use crate::{explain::goal_name_to_filename, goal::Goal};
+use cc_lemma::{explain::goal_name_to_filename, goal::Goal};
 
 fn main() -> Result<()> {
   simple_logger::init_with_level(CONFIG.log_level).unwrap();
@@ -206,7 +196,7 @@ fn prove_goal<'a>(
       println!("  {:?}", rule);
     }
   }
-  let (result, mut proof_state) = goal::prove_top(goal_prop, goal_premise, global_search_state);
+  let (result, mut proof_state) = prove_top(goal_prop, goal_premise, global_search_state);
   let mut num_lemmas = 0;
   let mut num_proven_lemmas = 0;
   let mut num_lemmas_not_attempted = 0;
