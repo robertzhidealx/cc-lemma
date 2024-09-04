@@ -55,6 +55,51 @@ pub fn print_expressions_in_eclass<L: egg::Language + std::fmt::Display, N: egg:
     }
   }
 }
+
+pub fn dump_eclass_exprs<L: egg::Language + std::fmt::Display, N: egg::Analysis<L>>(
+  egraph: &EGraph<L, N>,
+  id: Id,
+) -> Vec<String> {
+  let mut cache = HashMap::new();
+  dump_eclass_exprs_aux(egraph, &mut cache, id, 50)
+}
+
+fn dump_eclass_exprs_aux<L: egg::Language + std::fmt::Display, N: egg::Analysis<L>>(
+  egraph: &EGraph<L, N>,
+  cache: &mut HashMap<Id, Vec<String>>,
+  id: Id,
+  iter: usize,
+) -> Vec<String> {
+  if cache.contains_key(&id) {
+    return cache[&id].clone();
+  }
+  let mut exprs = vec![];
+  if iter == 0 {
+    return exprs;
+  }
+
+  for node in egraph[id].nodes.iter() {
+    let mut child_expr_combos = vec![];
+    for child in node.children() {
+      let children = dump_eclass_exprs_aux(egraph, cache, *child, iter - 1);
+      child_expr_combos.push(children);
+    }
+    if child_expr_combos.is_empty() {
+      exprs.push(format!("({})", node));
+    } else {
+      for child_exprs in child_expr_combos.iter().multi_cartesian_product() {
+        if child_exprs.is_empty() {
+          exprs.push(format!("({})", node));
+        } else {
+          exprs.push(format!("({} {})", node, child_exprs.into_iter().join(" ")));
+        }
+      }
+    }
+  }
+
+  cache.insert(id, exprs.clone());
+  exprs
+}
 #[derive(Clone)]
 struct ExpressionStorage {
   pub exp_storage: Vec<HashSet<String>>,

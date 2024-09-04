@@ -731,9 +731,10 @@ impl<'a> Goal<'a> {
       .global_search_state
       .reductions
       .iter()
-      .chain(self.lemmas.values())
+      // .chain(self.lemmas.values())
       .chain(top_lemmas.values())
       .collect();
+    // println!("rewrites: {:#?}", rewrites);
     let lhs_id = self.eq.lhs.id;
     let rhs_id = self.eq.rhs.id;
     let runner = Runner::default()
@@ -1290,46 +1291,71 @@ impl<'a> Goal<'a> {
   /// (i.e. not equivalent to a constant or a scrutinee variable),
   /// add a fresh scrutinee to its eclass, so that we can match on it.
   fn split_ite(&mut self) {
+    println!("=== split_ite ===");
     let guard_var = "?g".parse().unwrap();
+    // println!("guard var: {guard_var}");
     // Pattern "(ite ?g ?x ?y)"
     let searcher: Pattern<SymbolLang> = format!("({} {} ?x ?y)", *ITE, guard_var).parse().unwrap();
+    println!("search e-graph for ites using {searcher}");
     let matches = searcher.search(&self.egraph);
     // Collects class IDs of all stuck guards;
     // it's a map because the same guard can match more than once, but we only want to add a new scrutinee once
     let mut stuck_guards = BTreeMap::new();
     for m in matches {
+      println!("found a match, go through substs:");
       for subst in m.substs {
+        println!("subst: {subst:?}");
         let guard_id = *subst.get(guard_var).unwrap();
+        println!("guard e-class:");
+        print_expressions_in_eclass(&self.egraph, guard_id);
         if let CanonicalForm::Stuck(_) = self.egraph[guard_id].data.canonical_form_data {
+          println!("guard is stuck");
           stuck_guards.insert(guard_id, subst);
         }
       }
     }
+    println!("stuck guards: {stuck_guards:?}");
     // Iterate over all stuck guard eclasses and add a new scrutinee to each
+    println!("go over stuck guards");
     for (guard_id, subst) in stuck_guards {
+      println!("guard ID: {guard_id}");
+      println!("guard subst: {subst:?}");
       let fresh_var = Symbol::from(format!("{}{}", GUARD_PREFIX, guard_id));
+      println!("fresh var: {fresh_var}");
       // This is here only for logging purposes
       let expr = Extractor::new(&self.egraph, AstSize).find_best(guard_id).1;
       let add_scrutinee_message =
         format!("adding scrutinee {} to split condition {}", fresh_var, expr);
+      println!("{add_scrutinee_message}");
       warn!("{}", add_scrutinee_message);
       self
         .local_context
         .insert(fresh_var, BOOL_TYPE.parse().unwrap());
       // We are adding the new scrutinee to the front of the deque,
       // because we want to split conditions first, since they don't introduce new variables
+      println!(
+        "make scrutinee for {fresh_var}: {:?}",
+        Scrutinee::new_guard(fresh_var)
+      );
       self.scrutinees.push_front(Scrutinee::new_guard(fresh_var));
       let new_node = SymbolLang::leaf(fresh_var);
       let new_pattern_ast = vec![ENodeOrVar::ENode(new_node.clone())].into();
+      println!("new_pattern_ast: {new_pattern_ast}");
       let guard_var_pattern_ast = vec![ENodeOrVar::Var(guard_var)].into();
+      println!("guard_var_pattern_ast: {guard_var_pattern_ast}");
       self.guard_exprs.insert(fresh_var.to_string(), expr);
-      self.egraph.union_instantiations(
+      println!("union_instantiations({guard_var_pattern_ast}, {new_pattern_ast}, {subst:?})");
+      let (union_id, union_happened) = self.egraph.union_instantiations(
         &guard_var_pattern_ast,
         &new_pattern_ast,
         &subst,
         add_scrutinee_message,
       );
+      println!("union e-class:");
+      print_expressions_in_eclass(&self.egraph, union_id);
+      println!("union_happened: {union_happened}");
     }
+    println!("*** split_ite ***");
     self.egraph.rebuild();
   }
 
@@ -1856,6 +1882,165 @@ impl<'a> Goal<'a> {
       }
     }
     lemmas
+  }
+
+  fn ripple_out(&mut self) -> Option<Goal<'a>> {
+    println!("=== ripple_out ===");
+
+    println!("full expr: {}", self.full_expr);
+    self._print_lhs_rhs();
+    if self.lemmas.len() == 2 {
+      let (_, lhs_ih_rw) = self.lemmas.iter().next().unwrap();
+      let (_, rhs_ih_rw) = self.lemmas.iter().last().unwrap();
+      let lhs_ih = Pattern::new(rhs_ih_rw.applier.get_pattern_ast().unwrap().clone());
+      let rhs_ih = Pattern::new(lhs_ih_rw.applier.get_pattern_ast().unwrap().clone());
+      println!("LHS IH: {lhs_ih}");
+      println!("RHS IH: {rhs_ih}");
+      let lhs = self.egraph.find(self.eq.lhs.id);
+      let rhs = self.egraph.find(self.eq.rhs.id);
+      let (rippled_rhs_set, lhs_ih_replacements) = self.get_rippled_exprs(&lhs_ih, &rhs_ih, lhs);
+      let (rippled_lhs_set, rhs_ih_replacements) = self.get_rippled_exprs(&rhs_ih, &lhs_ih, rhs);
+
+      for rippled_rhs in rippled_rhs_set {
+        println!("rippled_rhs:");
+        print_expressions_in_eclass(&self.egraph, rippled_rhs);
+        let union_status = self.egraph.union(rhs, rippled_rhs);
+        println!("union_status: {union_status}");
+        // self.full_expr = rewrite_expr(&self.full_expr, &self.eq.rhs.to_string(), ...);
+      }
+
+      for ih_replacement in lhs_ih_replacements {
+        println!("LHS IH replacement:");
+        print_expressions_in_eclass(&self.egraph, ih_replacement);
+      }
+
+      for rippled_lhs in rippled_lhs_set {
+        println!("rippled_lhs:");
+        print_expressions_in_eclass(&self.egraph, rippled_lhs);
+        let union_status = self.egraph.union(lhs, rippled_lhs);
+        println!("union_status: {union_status}");
+      }
+
+      for ih_replacement in rhs_ih_replacements {
+        println!("RHS IH replacement:");
+        print_expressions_in_eclass(&self.egraph, ih_replacement);
+      }
+
+      println!("LHS:");
+      for expr in dump_eclass_exprs(&self.egraph, lhs) {
+        println!("{}", expr);
+      }
+      println!("RHS:");
+      for expr in dump_eclass_exprs(&self.egraph, rhs) {
+        println!("{}", expr);
+      }
+
+      self.egraph.rebuild();
+      println!("*** ripple_out ***");
+      return Some(self.clone());
+    } else {
+      println!("cannot ripple");
+      println!("*** ripple_out ***");
+      None
+    }
+  }
+
+  fn get_rippled_exprs(
+    &mut self,
+    lhs_ih: &Pattern<SymbolLang>,
+    rhs_ih: &Pattern<SymbolLang>,
+    lhs: Id,
+  ) -> (HashSet<Id>, Vec<Id>) {
+    let mut rippled_rhs = HashSet::new();
+    let mut ih_replacements = vec![];
+
+    let mut cache = HashMap::new();
+    rippled_rhs.extend(self.pattern_replace_in_eclass_with_analysis_help(
+      &mut cache,
+      &mut ih_replacements,
+      lhs,
+      &lhs_ih,
+      &rhs_ih,
+    ));
+    rippled_rhs.remove(&self.egraph.find(lhs));
+
+    (rippled_rhs, ih_replacements)
+  }
+
+  pub fn pattern_replace_in_eclass_with_analysis_help(
+    &mut self,
+    cache: &mut HashMap<Id, HashSet<Id>>,
+    ih_replacement_vec: &mut Vec<Id>,
+    lhs: Id,
+    from: &Pattern<SymbolLang>,
+    to: &Pattern<SymbolLang>,
+  ) -> HashSet<Id> {
+    if let Some(inner) = cache.get(&lhs) {
+      return inner.clone();
+    }
+    cache.insert(lhs, HashSet::from_iter([lhs]));
+    let lhs_eclass = self.egraph[lhs].clone();
+    self.egraph.rebuild();
+    // println!("search for {from} in LHS e-class:");
+    // print_expressions_in_eclass(&self.egraph, lhs);
+    if let Some(matches) = from.search_eclass(&self.egraph, lhs) {
+      for subst in matches.substs {
+        // println!("found match: {subst:?}");
+        let new_id = self.add_instantiation_with_var_if_necessary(&to, subst);
+        cache.get_mut(&lhs).unwrap().insert(new_id);
+      }
+      ih_replacement_vec.push(lhs);
+    } else {
+      let limit = 5;
+      let mut j = 0;
+      for (_node_idx, node) in lhs_eclass.nodes.iter().enumerate() {
+        let mut new_child_ids = vec![vec![]];
+        for old_child_id in &node.children {
+          let mut temp = vec![];
+          let cur_ids = self.pattern_replace_in_eclass_with_analysis_help(
+            cache,
+            ih_replacement_vec,
+            *old_child_id,
+            from,
+            to,
+          );
+          for id_list in new_child_ids {
+            for id in &cur_ids {
+              let mut id_list_mod = id_list.clone();
+              id_list_mod.push(id.clone());
+              temp.push(id_list_mod);
+            }
+          }
+          new_child_ids = temp;
+        }
+        for id_list in new_child_ids {
+          let enode = SymbolLang::new(node.op, id_list);
+          let new_id = self.egraph.add(enode);
+          cache.get_mut(&lhs).unwrap().insert(new_id);
+          if j >= limit {
+            break;
+          }
+          j += 1;
+        }
+      }
+    }
+
+    cache.get(&lhs).unwrap().clone()
+  }
+
+  fn add_instantiation_with_var_if_necessary(
+    &mut self,
+    p_rhs: &Pattern<SymbolLang>,
+    mut subst_lhs: Subst,
+  ) -> Id {
+    for v in p_rhs.vars() {
+      if subst_lhs.get(v) == None {
+        let assumed_v = &v.to_string()[1..v.to_string().len()]; // remove the question mark
+        let enode = SymbolLang::leaf(assumed_v);
+        subst_lhs.insert(v, self.egraph.add(enode));
+      }
+    }
+    self.egraph.add_instantiation(&p_rhs.ast, &subst_lhs)
   }
 
   /// Used for debugging.
@@ -2522,7 +2707,16 @@ impl<'a> LemmaProofState<'a> {
     let pos = self.get_info_index(info);
     let goal = self.goals.get_mut(pos).unwrap();
 
+    // println!("before saturation");
+    // goal._print_lhs_rhs();
+
     goal.saturate(&lemmas_state.lemma_rewrites);
+
+    if true {
+      if let Some(new_goal) = goal.ripple_out() {
+        *goal = new_goal;
+      }
+    }
 
     if CONFIG.save_graphs {
       goal.save_egraph();
@@ -2542,7 +2736,7 @@ impl<'a> LemmaProofState<'a> {
       }
     }
     if CONFIG.verbose {
-      explain_goal_failure(goal);
+      explain_goal_failure(&goal);
     }
 
     /*let resolved_lhs_id = goal.egraph.find(goal.eq.lhs.id);
@@ -2583,7 +2777,7 @@ impl<'a> LemmaProofState<'a> {
       related_lemmas.extend(lemma_indices);
     }
     // println!("searching for cc lemmas");
-    if CONFIG.cc_lemmas {
+    if CONFIG.cc_lemmas && false {
       let possible_lemmas = goal.search_for_cc_lemmas(timer, lemmas_state);
       let lemma_indices = lemmas_state.add_lemmas(possible_lemmas, self.proof_depth + 1);
       related_lemmas.extend(lemma_indices);
@@ -2608,6 +2802,17 @@ impl<'a> LemmaProofState<'a> {
         goal
           .clone()
           .case_split(scrutinee, timer, lemmas_state, self.ih_lemma_number);
+
+      println!("case split subgoals");
+      for goal in &goals {
+        for s in dump_eclass_exprs(&goal.egraph, goal.eq.lhs.id) {
+          println!("{s}");
+        }
+        for s in dump_eclass_exprs(&goal.egraph, goal.eq.rhs.id) {
+          println!("{s}");
+        }
+      }
+
       // This goal is now an internal node in the proof tree.
       self.lemma_proof.proof.insert(goal_name, proof_term);
       // Add the new goals to the back of the VecDeque.
