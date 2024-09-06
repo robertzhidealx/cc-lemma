@@ -2,6 +2,7 @@ use egg::*;
 use lazy_static::lazy_static;
 
 use indexmap::IndexMap;
+use std::collections::HashSet;
 use std::{
   collections::{BTreeMap, BTreeSet},
   fmt::Display,
@@ -760,5 +761,22 @@ pub fn sexp_size(sexp: &Sexp) -> usize {
     Sexp::Empty => 0,
     Sexp::String(_) => 1,
     Sexp::List(xs) => xs.iter().map(sexp_size).sum::<usize>() + 1,
+  }
+}
+
+#[derive(PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Debug)]
+pub enum AU<Op, T> {
+  Node(Op, Vec<Self>),
+  Hole(T),
+}
+
+impl<Op: std::cmp::Eq + std::hash::Hash, T: std::cmp::Eq + std::hash::Hash> AU<Op, T> {
+  pub fn extract_holes(&self) -> HashSet<&AU<Op, T>> {
+    match self {
+      Self::Hole(_) => HashSet::from_iter([self]),
+      Self::Node(_, aus) => {
+        HashSet::from_iter(aus.iter().flat_map(|au| au.extract_holes().into_iter()))
+      }
+    }
   }
 }

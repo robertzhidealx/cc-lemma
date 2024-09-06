@@ -620,6 +620,8 @@ pub struct Goal<'a> {
   pub global_search_state: GlobalSearchState<'a>,
   /// added by Ruyi: to get the size after case split
   pub full_expr: Equation,
+  /// Induction hypothesis
+  pub ih: Option<(Pattern<SymbolLang>, Pattern<SymbolLang>)>,
 }
 
 impl<'a> Goal<'a> {
@@ -655,6 +657,7 @@ impl<'a> Goal<'a> {
       premises: premise.into_iter().collect(),
       global_search_state,
       full_expr: prop.eq.clone(),
+      ih: None,
     };
     // TODO: this could really also be a reference. Probably not necessary
     // for efficiency reason but yeah.
@@ -755,7 +758,7 @@ impl<'a> Goal<'a> {
   /// Look to see if we have proven the goal somehow. Note that this does not
   /// perform the actual proof search, it simply checks if the proof exists.
   pub fn find_proof(&mut self) -> Option<ProofLeaf> {
-    find_proof(&self.eq, &mut self.egraph)
+    find_proof(&self.eq, &self.ih, &mut self.egraph)
   }
 
   /// Check whether an expression is reducible using this goal's reductions
@@ -1291,71 +1294,103 @@ impl<'a> Goal<'a> {
   /// (i.e. not equivalent to a constant or a scrutinee variable),
   /// add a fresh scrutinee to its eclass, so that we can match on it.
   fn split_ite(&mut self) {
-    println!("=== split_ite ===");
+    if CONFIG.verbose {
+      println!("=== split_ite ===");
+    }
     let guard_var = "?g".parse().unwrap();
     // println!("guard var: {guard_var}");
     // Pattern "(ite ?g ?x ?y)"
     let searcher: Pattern<SymbolLang> = format!("({} {} ?x ?y)", *ITE, guard_var).parse().unwrap();
-    println!("search e-graph for ites using {searcher}");
+    if CONFIG.verbose {
+      println!("search e-graph for ites using {searcher}");
+    }
     let matches = searcher.search(&self.egraph);
     // Collects class IDs of all stuck guards;
     // it's a map because the same guard can match more than once, but we only want to add a new scrutinee once
     let mut stuck_guards = BTreeMap::new();
     for m in matches {
-      println!("found a match, go through substs:");
+      if CONFIG.verbose {
+        println!("found a match, go through substs:");
+      }
       for subst in m.substs {
-        println!("subst: {subst:?}");
+        if CONFIG.verbose {
+          println!("subst: {subst:?}");
+        }
         let guard_id = *subst.get(guard_var).unwrap();
-        println!("guard e-class:");
-        print_expressions_in_eclass(&self.egraph, guard_id);
+        if CONFIG.verbose {
+          println!("guard e-class:");
+          print_expressions_in_eclass(&self.egraph, guard_id);
+        }
         if let CanonicalForm::Stuck(_) = self.egraph[guard_id].data.canonical_form_data {
-          println!("guard is stuck");
+          if CONFIG.verbose {
+            println!("guard is stuck");
+          }
           stuck_guards.insert(guard_id, subst);
         }
       }
     }
-    println!("stuck guards: {stuck_guards:?}");
-    // Iterate over all stuck guard eclasses and add a new scrutinee to each
-    println!("go over stuck guards");
+    if CONFIG.verbose {
+      println!("stuck guards: {stuck_guards:?}");
+      // Iterate over all stuck guard eclasses and add a new scrutinee to each
+      println!("go over stuck guards");
+    }
     for (guard_id, subst) in stuck_guards {
-      println!("guard ID: {guard_id}");
-      println!("guard subst: {subst:?}");
+      if CONFIG.verbose {
+        println!("guard ID: {guard_id}");
+        println!("guard subst: {subst:?}");
+      }
       let fresh_var = Symbol::from(format!("{}{}", GUARD_PREFIX, guard_id));
-      println!("fresh var: {fresh_var}");
+      if CONFIG.verbose {
+        println!("fresh var: {fresh_var}");
+      }
       // This is here only for logging purposes
       let expr = Extractor::new(&self.egraph, AstSize).find_best(guard_id).1;
       let add_scrutinee_message =
         format!("adding scrutinee {} to split condition {}", fresh_var, expr);
-      println!("{add_scrutinee_message}");
-      warn!("{}", add_scrutinee_message);
+      if CONFIG.verbose {
+        println!("{add_scrutinee_message}");
+        warn!("{}", add_scrutinee_message);
+      }
       self
         .local_context
         .insert(fresh_var, BOOL_TYPE.parse().unwrap());
       // We are adding the new scrutinee to the front of the deque,
       // because we want to split conditions first, since they don't introduce new variables
-      println!(
-        "make scrutinee for {fresh_var}: {:?}",
-        Scrutinee::new_guard(fresh_var)
-      );
+      if CONFIG.verbose {
+        println!(
+          "make scrutinee for {fresh_var}: {:?}",
+          Scrutinee::new_guard(fresh_var)
+        );
+      }
       self.scrutinees.push_front(Scrutinee::new_guard(fresh_var));
       let new_node = SymbolLang::leaf(fresh_var);
       let new_pattern_ast = vec![ENodeOrVar::ENode(new_node.clone())].into();
-      println!("new_pattern_ast: {new_pattern_ast}");
+      if CONFIG.verbose {
+        println!("new_pattern_ast: {new_pattern_ast}");
+      }
       let guard_var_pattern_ast = vec![ENodeOrVar::Var(guard_var)].into();
-      println!("guard_var_pattern_ast: {guard_var_pattern_ast}");
+      if CONFIG.verbose {
+        println!("guard_var_pattern_ast: {guard_var_pattern_ast}");
+      }
       self.guard_exprs.insert(fresh_var.to_string(), expr);
-      println!("union_instantiations({guard_var_pattern_ast}, {new_pattern_ast}, {subst:?})");
+      if CONFIG.verbose {
+        println!("union_instantiations({guard_var_pattern_ast}, {new_pattern_ast}, {subst:?})");
+      }
       let (union_id, union_happened) = self.egraph.union_instantiations(
         &guard_var_pattern_ast,
         &new_pattern_ast,
         &subst,
         add_scrutinee_message,
       );
-      println!("union e-class:");
-      print_expressions_in_eclass(&self.egraph, union_id);
-      println!("union_happened: {union_happened}");
+      if CONFIG.verbose {
+        println!("union e-class:");
+        print_expressions_in_eclass(&self.egraph, union_id);
+        println!("union_happened: {union_happened}");
+      }
     }
-    println!("*** split_ite ***");
+    if CONFIG.verbose {
+      println!("*** split_ite ***");
+    }
     self.egraph.rebuild();
   }
 
@@ -1885,62 +1920,75 @@ impl<'a> Goal<'a> {
   }
 
   fn ripple_out(&mut self) -> Option<Goal<'a>> {
-    println!("=== ripple_out ===");
+    if CONFIG.verbose {
+      println!("=== ripple_out ===");
+      println!("full expr: {}", self.full_expr);
+      self._print_lhs_rhs();
+    }
 
-    println!("full expr: {}", self.full_expr);
-    self._print_lhs_rhs();
+    let lhs = self.egraph.find(self.eq.lhs.id);
+    let rhs = self.egraph.find(self.eq.rhs.id);
+
     if self.lemmas.len() == 2 {
-      let (_, lhs_ih_rw) = self.lemmas.iter().next().unwrap();
-      let (_, rhs_ih_rw) = self.lemmas.iter().last().unwrap();
-      let lhs_ih = Pattern::new(rhs_ih_rw.applier.get_pattern_ast().unwrap().clone());
-      let rhs_ih = Pattern::new(lhs_ih_rw.applier.get_pattern_ast().unwrap().clone());
-      println!("LHS IH: {lhs_ih}");
-      println!("RHS IH: {rhs_ih}");
-      let lhs = self.egraph.find(self.eq.lhs.id);
-      let rhs = self.egraph.find(self.eq.rhs.id);
-      let (rippled_rhs_set, lhs_ih_replacements) = self.get_rippled_exprs(&lhs_ih, &rhs_ih, lhs);
-      let (rippled_lhs_set, rhs_ih_replacements) = self.get_rippled_exprs(&rhs_ih, &lhs_ih, rhs);
-
-      for rippled_rhs in rippled_rhs_set {
-        println!("rippled_rhs:");
-        print_expressions_in_eclass(&self.egraph, rippled_rhs);
-        let union_status = self.egraph.union(rhs, rippled_rhs);
-        println!("union_status: {union_status}");
-        // self.full_expr = rewrite_expr(&self.full_expr, &self.eq.rhs.to_string(), ...);
+      let (_, ih_rw1) = self.lemmas.iter().next().unwrap();
+      let (_, ih_rw2) = self.lemmas.iter().last().unwrap();
+      let ih1 = Pattern::new(ih_rw1.applier.get_pattern_ast().unwrap().clone());
+      let ih2 = Pattern::new(ih_rw2.applier.get_pattern_ast().unwrap().clone());
+      let lhs_ih;
+      let rhs_ih;
+      if ih1.search_eclass(&self.egraph, lhs).is_some() {
+        lhs_ih = ih1;
+        rhs_ih = ih2;
+      } else {
+        lhs_ih = ih2;
+        rhs_ih = ih1;
       }
 
-      for ih_replacement in lhs_ih_replacements {
-        println!("LHS IH replacement:");
-        print_expressions_in_eclass(&self.egraph, ih_replacement);
+      if CONFIG.verbose {
+        println!("LHS IH:\n{lhs_ih}");
+        println!("RHS IH:\n{rhs_ih}");
+      }
+      self.ih = Some((lhs_ih.clone(), rhs_ih.clone()));
+      let (rippled_rhs_set, _) = self.get_rippled_exprs(&lhs_ih, &rhs_ih, lhs);
+      let (rippled_lhs_set, _) = self.get_rippled_exprs(&rhs_ih, &lhs_ih, rhs);
+
+      for rippled_rhs in rippled_rhs_set {
+        if CONFIG.verbose {
+          println!("rippled RHS:");
+          dump_eclass_exprs(&self.egraph, rippled_rhs);
+        }
+        let union_status = self.egraph.union(rhs, rippled_rhs);
+        if CONFIG.verbose {
+          println!("union_status: {union_status}");
+        }
       }
 
       for rippled_lhs in rippled_lhs_set {
-        println!("rippled_lhs:");
-        print_expressions_in_eclass(&self.egraph, rippled_lhs);
+        if CONFIG.verbose {
+          println!("rippled LHS:");
+          dump_eclass_exprs(&self.egraph, rippled_lhs);
+        }
         let union_status = self.egraph.union(lhs, rippled_lhs);
-        println!("union_status: {union_status}");
-      }
-
-      for ih_replacement in rhs_ih_replacements {
-        println!("RHS IH replacement:");
-        print_expressions_in_eclass(&self.egraph, ih_replacement);
-      }
-
-      println!("LHS:");
-      for expr in dump_eclass_exprs(&self.egraph, lhs) {
-        println!("{}", expr);
-      }
-      println!("RHS:");
-      for expr in dump_eclass_exprs(&self.egraph, rhs) {
-        println!("{}", expr);
+        if CONFIG.verbose {
+          println!("union_status: {union_status}");
+        }
       }
 
       self.egraph.rebuild();
-      println!("*** ripple_out ***");
+
+      if CONFIG.verbose {
+        println!("LHS:");
+        dump_eclass_exprs(&self.egraph, lhs);
+        println!("RHS:");
+        dump_eclass_exprs(&self.egraph, rhs);
+        println!("*** ripple_out ***");
+      }
       return Some(self.clone());
     } else {
-      println!("cannot ripple");
-      println!("*** ripple_out ***");
+      if CONFIG.verbose {
+        println!("cannot ripple");
+        println!("*** ripple_out ***");
+      }
       None
     }
   }
@@ -1967,7 +2015,7 @@ impl<'a> Goal<'a> {
     (rippled_rhs, ih_replacements)
   }
 
-  pub fn pattern_replace_in_eclass_with_analysis_help(
+  fn pattern_replace_in_eclass_with_analysis_help(
     &mut self,
     cache: &mut HashMap<Id, HashSet<Id>>,
     ih_replacement_vec: &mut Vec<Id>,
@@ -2041,6 +2089,125 @@ impl<'a> Goal<'a> {
       }
     }
     self.egraph.add_instantiation(&p_rhs.ast, &subst_lhs)
+  }
+
+  fn decompose(&self, lemmas_state: &mut LemmasState, timer: &Timer) -> Option<Vec<Goal<'a>>> {
+    if CONFIG.verbose {
+      println!("=== decompose ===");
+      println!("full expr: {}", self.full_expr);
+    }
+    let lhs = self.eq.lhs.id;
+    let rhs = self.eq.rhs.id;
+    if CONFIG.verbose {
+      println!("LHS:");
+      dump_eclass_exprs(&self.egraph, lhs);
+      println!("RHS:");
+      dump_eclass_exprs(&self.egraph, rhs);
+    }
+    let mut cache = BTreeMap::new();
+    let aus = self
+      .au_eclass(&mut cache, (lhs, rhs))
+      .iter()
+      .filter(|au| match au {
+        AU::Hole(_) => false,
+        _ => true,
+      })
+      .flat_map(|au| au.extract_holes())
+      .map(|hole| match hole {
+        AU::Node(_, _) => panic!("unreachable"),
+        AU::Hole((lhs, rhs)) => (*lhs, *rhs),
+      })
+      .collect::<Vec<_>>();
+    if aus.is_empty() {
+      if CONFIG.verbose {
+        println!("cannot decompose");
+        println!("*** decompose ***");
+      }
+      None
+    } else {
+      let mut new_goals = vec![];
+      for (au_lhs, au_rhs) in aus {
+        if CONFIG.verbose {
+          println!("new goal:");
+          dump_eclass_exprs(&self.egraph, au_lhs);
+          println!("===");
+          dump_eclass_exprs(&self.egraph, au_rhs);
+        }
+        let mut new_goal = self.clone();
+        new_goal.eq.lhs.id = au_lhs;
+        new_goal.eq.rhs.id = au_rhs;
+        if let Some(ProofLeaf::StrongFertilization()) = new_goal.find_proof() {
+          let (rewrites, _rewrite_infos) = new_goal.make_lemma_rewrites_from_all_exprs(
+            new_goal.eq.lhs.id,
+            new_goal.eq.rhs.id,
+            vec![],
+            timer,
+            lemmas_state,
+            false,
+            false,
+          );
+          lemmas_state.lemma_rewrites.extend(rewrites);
+          continue;
+        }
+        new_goals.push(new_goal);
+      }
+      Some(new_goals)
+    }
+  }
+
+  pub fn au_eclass(
+    &self,
+    cache: &mut BTreeMap<(Id, Id), BTreeSet<AU<Symbol, (Id, Id)>>>,
+    state @ (c1, c2): (Id, Id),
+  ) -> BTreeSet<AU<Symbol, (Id, Id)>> {
+    if cache.contains_key(&state) {
+      return cache[&state].clone();
+    }
+    cache.insert(state, BTreeSet::new());
+
+    let mut aus = BTreeSet::new();
+    for (n1, n2) in self.egraph[c1]
+      .nodes
+      .iter()
+      .cartesian_product(&self.egraph[c2].nodes)
+    {
+      aus = aus
+        .union(&self.au_enode(cache, state, n1, n2))
+        .cloned()
+        .collect();
+    }
+
+    *cache.get_mut(&state).unwrap() = aus.clone();
+    aus
+  }
+
+  fn au_enode(
+    &self,
+    cache: &mut BTreeMap<(Id, Id), BTreeSet<AU<Symbol, (Id, Id)>>>,
+    state: (Id, Id),
+    n1: &SymbolLang,
+    n2: &SymbolLang,
+  ) -> BTreeSet<AU<Symbol, (Id, Id)>> {
+    let mut aus = BTreeSet::new();
+
+    if n1.op != n2.op || n1.children.len() != n2.children.len() {
+      let au = AU::Hole(state);
+      aus.insert(au);
+      return aus;
+    }
+
+    let mut child_aus = vec![];
+    for (&c1, &c2) in n1.children.iter().zip_eq(&n2.children) {
+      child_aus.push(self.au_eclass(cache, (c1, c2)));
+    }
+    for child_aus_prod in child_aus.iter().multi_cartesian_product() {
+      aus.insert(AU::Node(
+        n1.op,
+        child_aus_prod.into_iter().cloned().collect(),
+      ));
+    }
+
+    aus
   }
 
   /// Used for debugging.
@@ -2471,6 +2638,8 @@ pub enum ProofTerm {
 pub enum ProofLeaf {
   /// Constructive equality shown: LHS = RHS
   Refl(Explanation<SymbolLang>),
+  /// Proof by strong fertilization
+  StrongFertilization(),
   /// Contradiction shown (e.g. True = False)
   Contradiction(Explanation<SymbolLang>),
   /// Unimplemented proof type (will crash on proof emission)
@@ -2481,6 +2650,7 @@ impl ProofLeaf {
   fn _name(&self) -> String {
     match &self {
       Self::Refl(_) => "Refl".to_string(),
+      Self::StrongFertilization() => "Fertilization".to_string(),
       Self::Contradiction(_) => "Contradiction".to_string(),
       Self::Todo => "TODO".to_string(),
     }
@@ -2491,6 +2661,7 @@ impl std::fmt::Display for ProofLeaf {
   fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
     match self {
       ProofLeaf::Refl(expl) => write!(f, "{}", expl.get_string()),
+      ProofLeaf::StrongFertilization() => write!(f, "Proof by strong fertilization"),
       ProofLeaf::Contradiction(expl) => write!(f, "{}", expl.get_string()),
       ProofLeaf::Todo => write!(f, "TODO: proof"),
     }
@@ -2712,12 +2883,6 @@ impl<'a> LemmaProofState<'a> {
 
     goal.saturate(&lemmas_state.lemma_rewrites);
 
-    if true {
-      if let Some(new_goal) = goal.ripple_out() {
-        *goal = new_goal;
-      }
-    }
-
     if CONFIG.save_graphs {
       goal.save_egraph();
     }
@@ -2789,6 +2954,54 @@ impl<'a> LemmaProofState<'a> {
 
     goal.debug_search_for_patterns_in_egraph();
 
+    if true {
+      if let Some(new_goal) = goal.ripple_out() {
+        *goal = new_goal;
+      }
+    }
+
+    let mut goal = goal.clone();
+
+    if true {
+      if let Some(new_goals) = goal.decompose(lemmas_state, timer) {
+        // if status {
+        //   return None;
+        // }
+        for new_goal in new_goals {
+          let (_rewrites, rewrite_infos) = new_goal.make_lemma_rewrites_from_all_exprs(
+            new_goal.eq.lhs.id,
+            new_goal.eq.rhs.id,
+            vec![],
+            timer,
+            lemmas_state,
+            false,
+            false,
+          );
+          let new_rewrite_eqs: Vec<Prop> = rewrite_infos
+            .into_iter()
+            .map(|rw_info| rw_info.lemma_prop)
+            .collect();
+          // let fresh_name = format!("fresh_{}_{}", new_goal.name, new_goal.egraph.total_size());
+          // let mut lemmas = vec![];
+          // for new_rewrite_eq in new_rewrite_eqs.iter() {
+          //   lemmas.extend(find_generalizations_prop(
+          //     new_rewrite_eq,
+          //     new_goal.global_search_state.context,
+          //     fresh_name.clone(),
+          //   ));
+          // }
+          // let lemma_indices = lemmas_state.add_lemmas(lemmas, self.proof_depth + 1);
+          let lemma_indices = lemmas_state.add_lemmas(new_rewrite_eqs, self.proof_depth + 1);
+          related_lemmas.extend(lemma_indices);
+          // lemmas_state.lemma_rewrites.extend(rewrites);
+        }
+      }
+    }
+
+    // if true {
+    //   goal.behavioral_decompose();
+    // }
+
     if let Some(scrutinee) = goal.next_scrutinee(blocking_vars) {
       if CONFIG.verbose {
         println!(
@@ -2803,13 +3016,13 @@ impl<'a> LemmaProofState<'a> {
           .clone()
           .case_split(scrutinee, timer, lemmas_state, self.ih_lemma_number);
 
-      println!("case split subgoals");
-      for goal in &goals {
-        for s in dump_eclass_exprs(&goal.egraph, goal.eq.lhs.id) {
-          println!("{s}");
-        }
-        for s in dump_eclass_exprs(&goal.egraph, goal.eq.rhs.id) {
-          println!("{s}");
+      if CONFIG.verbose {
+        println!("case split subgoals:");
+        for goal in &goals {
+          println!("LHS:");
+          dump_eclass_exprs(&goal.egraph, goal.eq.lhs.id);
+          println!("RHS:");
+          dump_eclass_exprs(&goal.egraph, goal.eq.rhs.id);
         }
       }
 
@@ -2819,7 +3032,7 @@ impl<'a> LemmaProofState<'a> {
       let goal_infos = goals
         .iter()
         .map(|new_goal| GoalInfo::new(new_goal, info.lemma_id))
-        .collect();
+        .collect::<Vec<_>>();
       self.goals.extend(goals);
       Some((related_lemmas, goal_infos))
     } else {
@@ -2901,6 +3114,9 @@ impl<'a> ProofState<'a> {
     top_level_lemma_number: usize,
     scheduler: &mut impl BreadthFirstScheduler,
   ) -> Outcome {
+    if CONFIG.verbose {
+      println!("=== prove_breadth_first ===");
+    }
     let mut _i = 0;
     let mut visited_lemma = HashSet::new();
     loop {
@@ -2916,12 +3132,21 @@ impl<'a> ProofState<'a> {
       let lemma_batch_res = scheduler.next_lemma_batch(top_level_lemma_number, self);
       match lemma_batch_res {
         Err(outcome) => {
+          if CONFIG.verbose {
+            println!("*** prove_breadth_first ***");
+          }
           return outcome;
         }
         Ok(_) => {}
       }
+      if CONFIG.verbose {
+        println!("go over each lemma in batch");
+      }
       for lemma_index in lemma_batch_res.unwrap() {
         if self.timer.timeout() {
+          if CONFIG.verbose {
+            println!("*** prove_breadth_first ***");
+          }
           return Outcome::Timeout;
         }
         let lemma_number = scheduler.get_lemma_number(&lemma_index);
@@ -2952,6 +3177,9 @@ impl<'a> ProofState<'a> {
           && lemma_proof_state.outcome.is_some()
           && lemma_proof_state.outcome != Some(Outcome::Unknown)
         {
+          if CONFIG.verbose {
+            println!("*** prove_breadth_first ***");
+          }
           return lemma_proof_state.outcome.as_ref().unwrap().clone();
         }
         if lemma_proof_state.outcome == Some(Outcome::Valid) {
@@ -2998,6 +3226,7 @@ struct GoalLevelPriorityQueue {
 }
 
 impl GoalLevelPriorityQueue {
+  // TODO
   fn add_lemmas_for(
     &mut self,
     info: &GoalInfo,
@@ -3073,6 +3302,9 @@ impl BreadthFirstScheduler for GoalLevelPriorityQueue {
     _top_level_lemma_number: usize,
     proof_state: &mut ProofState<'_>,
   ) -> Result<Vec<Self::LemmaIndex>, Outcome> {
+    if CONFIG.verbose {
+      println!("=== next_lemma_batch ===");
+    }
     // No more lemmas to try and prove
     if self.is_found_new_lemma {
       self.update_subsumed_lemmas(proof_state);
@@ -3086,7 +3318,7 @@ impl BreadthFirstScheduler for GoalLevelPriorityQueue {
         println!("[{}] {}", info.size, info.full_exp);
         println!("  ({}) {}", info.lemma_id, self.prop_map[&info.lemma_id]);
       }
-      println!("\n\n");
+      println!("\n");
     }
     if frontier
       .iter()
@@ -3095,13 +3327,22 @@ impl BreadthFirstScheduler for GoalLevelPriorityQueue {
       frontier.retain(|info| self.progress_set.contains(&info.lemma_id));
     }
     if let Some(optimal) = frontier.into_iter().min_by_key(|info| info.size) {
+      if CONFIG.verbose {
+        println!("select min-size goal: {optimal:#?}");
+      }
       self.next_goal = Some(optimal.clone());
       if self.progress_set.contains(&optimal.lemma_id) {
         self.progress_set.remove(&optimal.lemma_id);
       }
+      if CONFIG.verbose {
+        println!("*** next_lemma_batch ***");
+      }
       Ok(vec![optimal.lemma_id])
     } else {
-      println!("report unknown because of an empty queue");
+      if CONFIG.verbose {
+        println!("report unknown because of an empty queue");
+        println!("*** next_lemma_batch ***");
+      }
       Err(Outcome::Unknown)
     }
   }
@@ -3111,6 +3352,9 @@ impl BreadthFirstScheduler for GoalLevelPriorityQueue {
   }
 
   fn handle_lemma(&mut self, lemma_index: Self::LemmaIndex, proof_state: &mut ProofState<'_>) {
+    if CONFIG.verbose {
+      println!("=== handle_lemma ===");
+    }
     assert!(self.next_goal.is_some());
     let info = self.next_goal.clone().unwrap();
     assert_eq!(info.lemma_id, lemma_index);
@@ -3227,9 +3471,15 @@ impl BreadthFirstScheduler for GoalLevelPriorityQueue {
         }
       }
     }
+    if CONFIG.verbose {
+      println!("*** handle_lemma ***");
+    }
   }
 
   fn on_proven_lemma(&mut self, _lemma: usize, proof_state: &mut ProofState<'_>) {
+    if CONFIG.verbose {
+      println!("on_proven_lemma");
+    }
     let mut new_lemma = HashSet::new();
     new_lemma.insert(_lemma);
 
@@ -3338,7 +3588,11 @@ pub fn explain_goal_failure(goal: &Goal) {
   println!("{} {}", "Could not prove".red(), goal.name);
 }
 
-fn find_proof(eq: &ETermEquation, egraph: &mut Eg) -> Option<ProofLeaf> {
+fn find_proof(
+  eq: &ETermEquation,
+  ih: &Option<(Pattern<SymbolLang>, Pattern<SymbolLang>)>,
+  egraph: &mut Eg,
+) -> Option<ProofLeaf> {
   let resolved_lhs_id = egraph.find(eq.lhs.id);
   let resolved_rhs_id = egraph.find(eq.rhs.id);
   // Have we proven LHS == RHS?
@@ -3352,6 +3606,29 @@ fn find_proof(eq: &ETermEquation, egraph: &mut Eg) -> Option<ProofLeaf> {
     return Some(ProofLeaf::Refl(
       egraph.explain_equivalence(&eq.lhs.expr, &eq.rhs.expr),
     ));
+  }
+
+  if let Some((lhs_ih, rhs_ih)) = ih {
+    if let Some(lhs_matches) = lhs_ih.search_eclass(egraph, resolved_lhs_id) {
+      if let Some(rhs_matches) = rhs_ih.search_eclass(egraph, resolved_rhs_id) {
+        for (m1, m2) in lhs_matches
+          .substs
+          .iter()
+          .cartesian_product(&rhs_matches.substs)
+        {
+          let mut all_vars_consistent = true;
+          for v in lhs_ih.vars() {
+            all_vars_consistent &= m1.get(v) == m2.get(v);
+          }
+          for v in rhs_ih.vars() {
+            all_vars_consistent &= m1.get(v) == m2.get(v);
+          }
+          if all_vars_consistent {
+            return Some(ProofLeaf::StrongFertilization());
+          }
+        }
+      }
+    }
   }
 
   // Check if this case in unreachable (i.e. if there are any inconsistent
@@ -3408,6 +3685,11 @@ pub fn prove_top(
   goal_premise: Option<Equation>,
   global_search_state: GlobalSearchState<'_>,
 ) -> (Outcome, ProofState) {
+  if CONFIG.verbose {
+    println!("=== prove_top ===");
+    println!("goal prop: {goal_prop}");
+  }
+
   let mut proof_state = ProofState {
     timer: Timer::new(Instant::now()),
     lemmas_state: LemmasState::default(),
@@ -3426,7 +3708,15 @@ pub fn prove_top(
     0,
   );
 
+  if CONFIG.verbose {
+    for goal in &top_goal_lemma_proof.goals {
+      println!("proof goal: {}", goal.eq);
+    }
+  }
   let start_info = GoalInfo::new(&top_goal_lemma_proof.goals[0], top_goal_lemma_number);
+  if CONFIG.verbose {
+    println!("start info: {:#?}", start_info);
+  }
   let mut scheduler = GoalLevelPriorityQueue::default();
   scheduler.goal_graph.new_lemma(&start_info, None);
   scheduler
@@ -3440,6 +3730,9 @@ pub fn prove_top(
   // let outcome = proof_state.prove_lemma(top_goal_lemma_number);
   // let outcome = proof_state.prove_breadth_first(top_goal_lemma_number, &mut LemmaSizePriorityQueue::default());
   let outcome = proof_state.prove_breadth_first(top_goal_lemma_number, &mut scheduler);
-
+  if CONFIG.verbose {
+    println!("outcome: {outcome}");
+    println!("*** prove_top ***");
+  }
   (outcome, proof_state)
 }

@@ -478,6 +478,7 @@ fn explain_proof(
           // Just use this proof on its own.
           explain_goal(depth, expl, top_goal_name, lemma_map)
         }
+        ProofLeaf::StrongFertilization() => "Proof by strong fertilization".to_string(),
         // It doesn't matter what we do here
         ProofLeaf::Todo => todo!("Proof not implemented for proof of {}", goal),
       };

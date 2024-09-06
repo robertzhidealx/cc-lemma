@@ -188,6 +188,9 @@ fn prove_goal<'a>(
   global_search_state: GlobalSearchState<'a>,
   cyclic: bool,
 ) -> Result<(Outcome, Duration, usize, usize, usize)> {
+  if CONFIG.verbose {
+    println!("=== prove_goal ===");
+  }
   CONFIG.set_cyclic(cyclic);
   let start_time = Instant::now();
   if CONFIG.verbose {
@@ -233,6 +236,9 @@ fn prove_goal<'a>(
     }
   }
 
+  if CONFIG.verbose {
+    println!("*** prove_goal ***");
+  }
   Ok((
     result,
     duration,
