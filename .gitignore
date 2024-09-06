@@ -7,3 +7,4 @@
 /cvc4-comparison/ind/**
 /cvc4-comparison/cvc4
 scripts/__pycache__
+*.result

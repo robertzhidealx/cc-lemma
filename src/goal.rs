@@ -734,7 +734,8 @@ impl<'a> Goal<'a> {
       .global_search_state
       .reductions
       .iter()
-      // .chain(self.lemmas.values())
+      // Turn on when benchmarking OG CCLemma
+      .chain(self.lemmas.values())
       .chain(top_lemmas.values())
       .collect();
     // println!("rewrites: {:#?}", rewrites);
@@ -1187,7 +1188,7 @@ impl<'a> Goal<'a> {
   /// here lhs and rhs are patterns, created by replacing all scrutinees with wildcards;
   /// soundness requires that the pattern only apply to variable tuples smaller than the current scrutinee tuple.
   fn add_lemma_rewrites(
-    &self,
+    &mut self,
     timer: &Timer,
     lemmas_state: &mut LemmasState,
     ih_lemma_number: usize,
@@ -1214,6 +1215,12 @@ impl<'a> Goal<'a> {
         );
         panic!()
       }
+
+      let is_var = |v| self.local_context.contains_key(v);
+      let lhs_pat = to_pattern(&self.eq.lhs.expr, is_var);
+      let rhs_pat = to_pattern(&self.eq.rhs.expr, is_var);
+      self.ih = Some((lhs_pat, rhs_pat));
+
       let lemma_rw = lemma_rw.unwrap();
       lemma_rw.add_to_rewrites(&mut rewrites);
       return rewrites;
@@ -1226,6 +1233,7 @@ impl<'a> Goal<'a> {
     }
   }
 
+  // TODO: use this?
   /// Creates cyclic lemmas from the current goal.
   fn make_cyclic_lemma_rewrites(
     &self,
@@ -1396,7 +1404,7 @@ impl<'a> Goal<'a> {
 
   /// Consume this goal and add its case splits to the proof state
   fn case_split(
-    self,
+    mut self,
     scrutinee: Scrutinee,
     timer: &Timer,
     lemmas_state: &mut LemmasState,
@@ -1929,34 +1937,20 @@ impl<'a> Goal<'a> {
     let lhs = self.egraph.find(self.eq.lhs.id);
     let rhs = self.egraph.find(self.eq.rhs.id);
 
-    if self.lemmas.len() == 2 {
-      let (_, ih_rw1) = self.lemmas.iter().next().unwrap();
-      let (_, ih_rw2) = self.lemmas.iter().last().unwrap();
-      let ih1 = Pattern::new(ih_rw1.applier.get_pattern_ast().unwrap().clone());
-      let ih2 = Pattern::new(ih_rw2.applier.get_pattern_ast().unwrap().clone());
-      let lhs_ih;
-      let rhs_ih;
-      if ih1.search_eclass(&self.egraph, lhs).is_some() {
-        lhs_ih = ih1;
-        rhs_ih = ih2;
-      } else {
-        lhs_ih = ih2;
-        rhs_ih = ih1;
-      }
-
+    if let Some((lhs_ih, rhs_ih)) = &self.ih.clone() {
       if CONFIG.verbose {
         println!("LHS IH:\n{lhs_ih}");
         println!("RHS IH:\n{rhs_ih}");
       }
-      self.ih = Some((lhs_ih.clone(), rhs_ih.clone()));
-      let (rippled_rhs_set, _) = self.get_rippled_exprs(&lhs_ih, &rhs_ih, lhs);
-      let (rippled_lhs_set, _) = self.get_rippled_exprs(&rhs_ih, &lhs_ih, rhs);
+      let (rippled_rhs_set, _) = self.get_rippled_exprs(lhs_ih, rhs_ih, lhs);
+      let (rippled_lhs_set, _) = self.get_rippled_exprs(rhs_ih, lhs_ih, rhs);
 
       for rippled_rhs in rippled_rhs_set {
         if CONFIG.verbose {
           println!("rippled RHS:");
           dump_eclass_exprs(&self.egraph, rippled_rhs);
         }
+        // TODO: union here or make new goal for later?
         let union_status = self.egraph.union(rhs, rippled_rhs);
         if CONFIG.verbose {
           println!("union_status: {union_status}");
@@ -2091,7 +2085,7 @@ impl<'a> Goal<'a> {
     self.egraph.add_instantiation(&p_rhs.ast, &subst_lhs)
   }
 
-  fn decompose(&self, lemmas_state: &mut LemmasState, timer: &Timer) -> Option<Vec<Goal<'a>>> {
+  fn decompose(&mut self, lemmas_state: &mut LemmasState, timer: &Timer) -> Option<Vec<Goal<'a>>> {
     if CONFIG.verbose {
       println!("=== decompose ===");
       println!("full expr: {}", self.full_expr);
@@ -2134,10 +2128,12 @@ impl<'a> Goal<'a> {
           dump_eclass_exprs(&self.egraph, au_rhs);
         }
         let mut new_goal = self.clone();
+        new_goal.eq.lhs.expr = RecExpr::default();
+        new_goal.eq.rhs.expr = RecExpr::default();
         new_goal.eq.lhs.id = au_lhs;
         new_goal.eq.rhs.id = au_rhs;
         if let Some(ProofLeaf::StrongFertilization()) = new_goal.find_proof() {
-          let (rewrites, _rewrite_infos) = new_goal.make_lemma_rewrites_from_all_exprs(
+          let (rewrites, rewrite_infos) = new_goal.make_lemma_rewrites_from_all_exprs(
             new_goal.eq.lhs.id,
             new_goal.eq.rhs.id,
             vec![],
@@ -2146,10 +2142,16 @@ impl<'a> Goal<'a> {
             false,
             false,
           );
-          lemmas_state.lemma_rewrites.extend(rewrites);
+          for rewrite_info in rewrite_infos {
+            rewrite_info.add_to_rewrites(&mut lemmas_state.lemma_rewrites);
+          }
+          self.lemmas.extend(rewrites);
           continue;
         }
         new_goals.push(new_goal);
+      }
+      if CONFIG.verbose {
+        println!("*** decompose ***");
       }
       Some(new_goals)
     }
@@ -2640,6 +2642,8 @@ pub enum ProofLeaf {
   Refl(Explanation<SymbolLang>),
   /// Proof by strong fertilization
   StrongFertilization(),
+  /// Proof by decomposition
+  Decomposition(),
   /// Contradiction shown (e.g. True = False)
   Contradiction(Explanation<SymbolLang>),
   /// Unimplemented proof type (will crash on proof emission)
@@ -2651,6 +2655,7 @@ impl ProofLeaf {
     match &self {
       Self::Refl(_) => "Refl".to_string(),
       Self::StrongFertilization() => "Fertilization".to_string(),
+      Self::Decomposition() => "Decomposition".to_string(),
       Self::Contradiction(_) => "Contradiction".to_string(),
       Self::Todo => "TODO".to_string(),
     }
@@ -2662,6 +2667,7 @@ impl std::fmt::Display for ProofLeaf {
     match self {
       ProofLeaf::Refl(expl) => write!(f, "{}", expl.get_string()),
       ProofLeaf::StrongFertilization() => write!(f, "Proof by strong fertilization"),
+      ProofLeaf::Decomposition() => write!(f, "Proof by decomposition"),
       ProofLeaf::Contradiction(expl) => write!(f, "{}", expl.get_string()),
       ProofLeaf::Todo => write!(f, "TODO: proof"),
     }
@@ -2764,6 +2770,7 @@ pub struct LemmaProofState<'a> {
   pub outcome: Option<Outcome>,
   pub proof_depth: usize,
   pub case_split_depth: usize,
+  // TODO
   pub ih_lemma_number: usize,
   // NOTE: We are phasing this out at least for proving lemmas breadth-first
   pub theorized_lemmas: ChainSet<Prop>,
@@ -2942,7 +2949,7 @@ impl<'a> LemmaProofState<'a> {
       related_lemmas.extend(lemma_indices);
     }
     // println!("searching for cc lemmas");
-    if CONFIG.cc_lemmas && false {
+    if true && CONFIG.cc_lemmas {
       let possible_lemmas = goal.search_for_cc_lemmas(timer, lemmas_state);
       let lemma_indices = lemmas_state.add_lemmas(possible_lemmas, self.proof_depth + 1);
       related_lemmas.extend(lemma_indices);
@@ -2954,7 +2961,7 @@ impl<'a> LemmaProofState<'a> {
 
     goal.debug_search_for_patterns_in_egraph();
 
-    if true {
+    if false {
       if let Some(new_goal) = goal.ripple_out() {
         *goal = new_goal;
       }
@@ -2962,11 +2969,8 @@ impl<'a> LemmaProofState<'a> {
 
     let mut goal = goal.clone();
 
-    if true {
+    if false {
       if let Some(new_goals) = goal.decompose(lemmas_state, timer) {
-        // if status {
-        //   return None;
-        // }
         for new_goal in new_goals {
           let (_rewrites, rewrite_infos) = new_goal.make_lemma_rewrites_from_all_exprs(
             new_goal.eq.lhs.id,
@@ -3597,6 +3601,10 @@ fn find_proof(
   let resolved_rhs_id = egraph.find(eq.rhs.id);
   // Have we proven LHS == RHS?
   if resolved_lhs_id == resolved_rhs_id {
+    let default_expr = RecExpr::default();
+    if eq.lhs.expr == default_expr && eq.rhs.expr == default_expr {
+      return Some(ProofLeaf::Decomposition());
+    }
     if egraph.lookup_expr(&eq.lhs.expr).is_none() || egraph.lookup_expr(&eq.rhs.expr).is_none() {
       panic!(
         "One of {} or {} was removed from the e-graph! We can't emit a proof",
@@ -3624,6 +3632,12 @@ fn find_proof(
             all_vars_consistent &= m1.get(v) == m2.get(v);
           }
           if all_vars_consistent {
+            if CONFIG.verbose {
+              println!("LHS:");
+              dump_eclass_exprs(egraph, resolved_lhs_id);
+              println!("RHS:");
+              dump_eclass_exprs(egraph, resolved_rhs_id);
+            }
             return Some(ProofLeaf::StrongFertilization());
           }
         }
