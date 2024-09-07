@@ -730,14 +730,15 @@ impl<'a> Goal<'a> {
 
   /// Saturate the goal by applying all available rewrites
   pub fn saturate(&mut self, top_lemmas: &BTreeMap<String, Rw>) {
-    let rewrites: Vec<_> = self
+    let mut rewrites: Vec<_> = self
       .global_search_state
       .reductions
       .iter()
-      // Uncomment when benchmarking the original CCLemma
-      // .chain(self.lemmas.values())
       .chain(top_lemmas.values())
       .collect();
+    if !CONFIG.rippling_mode {
+      rewrites.extend(self.lemmas.values());
+    }
     // println!("rewrites: {:#?}", rewrites);
     let lhs_id = self.eq.lhs.id;
     let rhs_id = self.eq.rhs.id;
@@ -3067,7 +3068,7 @@ impl<'a> LemmaProofState<'a> {
       related_lemmas.extend(lemma_indices);
     }
     // println!("searching for cc lemmas");
-    if false && CONFIG.cc_lemmas {
+    if !CONFIG.rippling_mode && CONFIG.cc_lemmas {
       let possible_lemmas = goal.search_for_cc_lemmas(timer, lemmas_state);
       let lemma_indices = lemmas_state.add_lemmas(possible_lemmas, self.proof_depth + 1);
       related_lemmas.extend(lemma_indices);
@@ -3081,7 +3082,7 @@ impl<'a> LemmaProofState<'a> {
 
     goal.egraph.rebuild();
 
-    if true {
+    if CONFIG.rippling_mode {
       if let Some(new_goal) = goal.ripple_out() {
         *goal = new_goal;
       }
@@ -3089,7 +3090,7 @@ impl<'a> LemmaProofState<'a> {
 
     let mut goal = goal.clone();
 
-    if true {
+    if CONFIG.rippling_mode {
       if let Some(new_goals) = goal.decompose(lemmas_state, timer) {
         for new_goal in new_goals {
           let (_rewrites, rewrite_infos) = new_goal.make_lemma_rewrites_from_all_exprs(
@@ -3111,7 +3112,7 @@ impl<'a> LemmaProofState<'a> {
       }
     }
 
-    // if true {
+    // if CONFIG.rippling_mode {
     //   goal.behavioral_decompose();
     // }
 
@@ -3709,12 +3710,12 @@ fn find_proof(
   let resolved_rhs_id = egraph.find(eq.rhs.id);
   // Have we proven LHS == RHS?
   if resolved_lhs_id == resolved_rhs_id {
-    // --- Comment when benchmarking the original CCLemma
-    let default_expr = RecExpr::default();
-    if eq.lhs.expr == default_expr && eq.rhs.expr == default_expr {
-      return Some(ProofLeaf::Decomposition());
+    if CONFIG.rippling_mode {
+      let default_expr = RecExpr::default();
+      if eq.lhs.expr == default_expr && eq.rhs.expr == default_expr {
+        return Some(ProofLeaf::Decomposition());
+      }
     }
-    // ---
     if egraph.lookup_expr(&eq.lhs.expr).is_none() || egraph.lookup_expr(&eq.rhs.expr).is_none() {
       panic!(
         "One of {} or {} was removed from the e-graph! We can't emit a proof",
