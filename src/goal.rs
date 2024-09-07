@@ -1409,6 +1409,7 @@ impl<'a> Goal<'a> {
     ih_lemma_number: usize,
   ) -> (ProofTerm, Vec<Goal<'a>>) {
     let new_lemmas = self.add_lemma_rewrites(timer, lemmas_state, ih_lemma_number);
+    // println!("# lemmas: {}", self.lemmas.len());
 
     let var_str = scrutinee.name.to_string();
     warn!("case-split on {}", scrutinee.name);
@@ -1493,7 +1494,9 @@ impl<'a> Goal<'a> {
           .collect::<Vec<String>>()
           .join(" ")
       );
-      println!("Fill constructor: {con_app_string}");
+      if CONFIG.verbose {
+        println!("Fill constructor: {con_app_string}");
+      }
       let con_app: Expr = con_app_string.parse().unwrap();
 
       new_goal.name = format!("{}_{}={}", new_goal.name, scrutinee.name, con_app);
@@ -1809,9 +1812,9 @@ impl<'a> Goal<'a> {
     let resolved_lhs_id = self.egraph.find(self.eq.lhs.id);
     let resolved_rhs_id = self.egraph.find(self.eq.rhs.id);
     if CONFIG.verbose {
-      println!("lhs: ");
+      println!("LHS: ");
       print_expressions_in_eclass(&self.egraph, resolved_lhs_id);
-      println!("rhs: ");
+      println!("RHS: ");
       print_expressions_in_eclass(&self.egraph, resolved_rhs_id);
       // print_all_expressions_in_egraph(&self.egraph, 7);
     }
@@ -1854,6 +1857,7 @@ impl<'a> Goal<'a> {
               let num_differing_children: usize = zip(c1_node.children(), c2_node.children())
                 .map(|(child_1, child_2)| if child_1 != child_2 { 0 } else { 1 })
                 .sum();
+              //* They also do anti-unification, but in a very limited way:
               // There is a simpler CC lemma to prove.
               //
               // Consider for example the case when the canonical forms are
@@ -1933,8 +1937,10 @@ impl<'a> Goal<'a> {
       self._print_lhs_rhs();
     }
 
-    let lhs = self.eq.lhs.id;
-    let rhs = self.eq.rhs.id;
+    // let lhs = self.eq.lhs.id;
+    // let rhs = self.eq.rhs.id;
+    let lhs = self.egraph.find(self.eq.lhs.id);
+    let rhs = self.egraph.find(self.eq.rhs.id);
 
     // Only ripple when an IH exists, i.e., we are at case-split goal
     if let Some((lhs_ih, rhs_ih)) = &self.ih.clone() {
@@ -2089,8 +2095,10 @@ impl<'a> Goal<'a> {
       println!("=== decompose ===");
       println!("Full expr: {}", self.full_expr);
     }
-    let lhs = self.eq.lhs.id;
-    let rhs = self.eq.rhs.id;
+    // let lhs = self.eq.lhs.id;
+    // let rhs = self.eq.rhs.id;
+    let lhs = self.egraph.find(self.eq.lhs.id);
+    let rhs = self.egraph.find(self.eq.rhs.id);
     if CONFIG.verbose {
       dump_eclass_exprs(&self.egraph, lhs);
       println!("=?=");
@@ -3071,6 +3079,8 @@ impl<'a> LemmaProofState<'a> {
 
     // goal.debug_search_for_patterns_in_egraph();
 
+    goal.egraph.rebuild();
+
     if true {
       if let Some(new_goal) = goal.ripple_out() {
         *goal = new_goal;
@@ -3095,19 +3105,8 @@ impl<'a> LemmaProofState<'a> {
             .into_iter()
             .map(|rw_info| rw_info.lemma_prop)
             .collect();
-          // let fresh_name = format!("fresh_{}_{}", new_goal.name, new_goal.egraph.total_size());
-          // let mut lemmas = vec![];
-          // for new_rewrite_eq in new_rewrite_eqs.iter() {
-          //   lemmas.extend(find_generalizations_prop(
-          //     new_rewrite_eq,
-          //     new_goal.global_search_state.context,
-          //     fresh_name.clone(),
-          //   ));
-          // }
-          // let lemma_indices = lemmas_state.add_lemmas(lemmas, self.proof_depth + 1);
           let lemma_indices = lemmas_state.add_lemmas(new_rewrite_eqs, self.proof_depth + 1);
           related_lemmas.extend(lemma_indices);
-          // lemmas_state.lemma_rewrites.extend(rewrites);
         }
       }
     }
@@ -3528,7 +3527,7 @@ impl BreadthFirstScheduler for GoalLevelPriorityQueue {
         );
         for lemma in related_lemmas.iter() {
           println!(
-            "  ({}) {}",
+            "  [{}] {}",
             sexp_size(&lemma.1.eq.lhs) + sexp_size(&lemma.1.eq.rhs),
             lemma.1
           );
