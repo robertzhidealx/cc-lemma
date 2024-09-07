@@ -734,8 +734,8 @@ impl<'a> Goal<'a> {
       .global_search_state
       .reductions
       .iter()
-      // Turn on when benchmarking OG CCLemma
-      .chain(self.lemmas.values())
+      // Uncomment when benchmarking the original CCLemma
+      // .chain(self.lemmas.values())
       .chain(top_lemmas.values())
       .collect();
     // println!("rewrites: {:#?}", rewrites);
@@ -2212,6 +2212,104 @@ impl<'a> Goal<'a> {
     aus
   }
 
+  // fn behavioral_decompose(
+  //   &mut self,
+  //   lhs: Id,
+  //   rhs: Id,
+  //   top_lemmas: &BTreeMap<String, Rw>,
+  // ) -> Vec<Goal<'a>> {
+  //   let lemmas = self.get_descendant_pairs_with_matching_cvecs(lhs, rhs, top_lemmas);
+  //   let mut new_goals = vec![];
+  //   for ((e1, e2), (d1, d2)) in &lemmas {
+  //     let mut new_goal1 = self.clone();
+  //     new_goal1.eq.lhs.expr = RecExpr::default();
+  //     new_goal1.eq.rhs.expr = RecExpr::default();
+  //     new_goal1.eq.lhs.id = *e1;
+  //     new_goal1.eq.rhs.id = *e2;
+  //     new_goals.push(new_goal1);
+  //     let mut new_goal2 = self.clone();
+  //     new_goal2.eq.lhs.expr = RecExpr::default();
+  //     new_goal2.eq.rhs.expr = RecExpr::default();
+  //     new_goal2.eq.lhs.id = *d1;
+  //     new_goal2.eq.rhs.id = *d2;
+  //     new_goals.push(new_goal2);
+  //   }
+  //   new_goals
+  // }
+
+  // fn get_descendant_pairs_with_matching_cvecs(
+  //   &mut self,
+  //   f1: Id,
+  //   f2: Id,
+  //   top_lemmas: &BTreeMap<String, Rw>,
+  // ) -> Vec<((Id, Id), (Id, Id))> {
+  //   // first conj equating inner exprs
+  //   // second conj equating outer exprs
+  //   let mut f1_descendents = BTreeSet::new();
+  //   let mut f2_descendents = BTreeSet::new();
+  //   self.compute_descendents(f1, &mut f1_descendents);
+  //   self.compute_descendents(f2, &mut f2_descendents);
+  //   let mut lemmas = vec![];
+  //   for (e1, e2) in f1_descendents
+  //     .iter()
+  //     .cartesian_product(f2_descendents.iter())
+  //   {
+  //     if self.egraph[*e1].data.cvec_data == self.egraph[*e2].data.cvec_data
+  //       && *e1 != *e2
+  //       && (*e1 != f1 && *e2 != f2)
+  //     {
+  //       let d1 = self.replace_subexpr_with_fresh_var(f1, e1.clone());
+  //       let d2 = self.replace_subexpr_with_fresh_var(f2, e2.clone());
+  //       self.saturate(top_lemmas);
+  //       if self.egraph[d1].data.cvec_data == self.egraph[d2].data.cvec_data && d1 != d2 {
+  //         // f1 = d1 e1
+  //         // f2 = d2 e2
+  //         // eclass(e1 != e2) but cvec(e1 == e2)
+  //         // eclass(d1 != d2) but cvec(d1 == d2)
+  //         lemmas.push(((*e1, *e2), (d1, d2)));
+  //       }
+  //     }
+  //   }
+  //   lemmas
+  // }
+
+  // fn replace_subexpr_with_fresh_var(&self, f: Id, e: Id) -> Id {
+  //   let mut cache = HashMap::new();
+  //   let expr_temp = self.egraph.id_to_expr(e);
+  //   let expr_ref = expr_temp.as_ref();
+  //   let expr_sym = &expr_ref[expr_ref.len() - 1];
+  //   let expr_name = expr_sym.op.to_string();
+  //   let mut type_name = None;
+  //   if expr_sym.is_leaf() {
+  //     type_name = self
+  //       .egraph
+  //       .analysis
+  //       .cvec_analysis
+  //       .ctx
+  //       .var_map
+  //       .get(&expr_name);
+  //   } else {
+  //     if let Some(func) = d.functions.get(&expr_name) {
+  //       type_name = Some(&func.ret_type);
+  //     }
+  //   }
+  //   if let Some(t) = type_name {
+  //     let var_name = t.to_owned().to_lowercase() + "_decomp_" + &depth.to_string();
+  //     let new_elem = self.egraph.add(SymbolLang::new(var_name, vec![]));
+  //     let res = pattern_replace_in_eclass(
+  //       egraph,
+  //       f,
+  //       &Pattern::from(&self.egraph.id_to_expr(e)),
+  //       vec![Pattern::from(&self.egraph.id_to_expr(new_elem))],
+  //       &mut cache,
+  //       1,
+  //     );
+  //     return res[0][1];
+  //   }
+  //   e
+  //   // remember to apply rules to our newly created element, after this
+  // }
+
   /// Used for debugging.
   fn _print_lhs_rhs(&self) {
     let lhs_id = self.egraph.find(self.eq.lhs.id);
@@ -2949,7 +3047,7 @@ impl<'a> LemmaProofState<'a> {
       related_lemmas.extend(lemma_indices);
     }
     // println!("searching for cc lemmas");
-    if true && CONFIG.cc_lemmas {
+    if false && CONFIG.cc_lemmas {
       let possible_lemmas = goal.search_for_cc_lemmas(timer, lemmas_state);
       let lemma_indices = lemmas_state.add_lemmas(possible_lemmas, self.proof_depth + 1);
       related_lemmas.extend(lemma_indices);
@@ -2961,7 +3059,7 @@ impl<'a> LemmaProofState<'a> {
 
     goal.debug_search_for_patterns_in_egraph();
 
-    if false {
+    if true {
       if let Some(new_goal) = goal.ripple_out() {
         *goal = new_goal;
       }
@@ -2969,7 +3067,7 @@ impl<'a> LemmaProofState<'a> {
 
     let mut goal = goal.clone();
 
-    if false {
+    if true {
       if let Some(new_goals) = goal.decompose(lemmas_state, timer) {
         for new_goal in new_goals {
           let (_rewrites, rewrite_infos) = new_goal.make_lemma_rewrites_from_all_exprs(
@@ -3601,10 +3699,12 @@ fn find_proof(
   let resolved_rhs_id = egraph.find(eq.rhs.id);
   // Have we proven LHS == RHS?
   if resolved_lhs_id == resolved_rhs_id {
+    // --- Comment when benchmarking the original CCLemma
     let default_expr = RecExpr::default();
     if eq.lhs.expr == default_expr && eq.rhs.expr == default_expr {
       return Some(ProofLeaf::Decomposition());
     }
+    // ---
     if egraph.lookup_expr(&eq.lhs.expr).is_none() || egraph.lookup_expr(&eq.rhs.expr).is_none() {
       panic!(
         "One of {} or {} was removed from the e-graph! We can't emit a proof",
@@ -3619,20 +3719,21 @@ fn find_proof(
   if let Some((lhs_ih, rhs_ih)) = ih {
     if let Some(lhs_matches) = lhs_ih.search_eclass(egraph, resolved_lhs_id) {
       if let Some(rhs_matches) = rhs_ih.search_eclass(egraph, resolved_rhs_id) {
-        for (m1, m2) in lhs_matches
+        for (lhs_subst, rhs_subst) in lhs_matches
           .substs
           .iter()
           .cartesian_product(&rhs_matches.substs)
         {
           let mut all_vars_consistent = true;
           for v in lhs_ih.vars() {
-            all_vars_consistent &= m1.get(v) == m2.get(v);
+            all_vars_consistent &= lhs_subst.get(v) == rhs_subst.get(v);
           }
           for v in rhs_ih.vars() {
-            all_vars_consistent &= m1.get(v) == m2.get(v);
+            all_vars_consistent &= lhs_subst.get(v) == rhs_subst.get(v);
           }
           if all_vars_consistent {
             if CONFIG.verbose {
+              println!("Strong fertilization");
               println!("LHS:");
               dump_eclass_exprs(egraph, resolved_lhs_id);
               println!("RHS:");
