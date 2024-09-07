@@ -532,7 +532,7 @@ impl Equation {
 
 impl Display for Equation {
   fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-    write!(f, "{} === {}", self.lhs, self.rhs)
+    write!(f, "{} =?= {}", self.lhs, self.rhs)
   }
 }
 

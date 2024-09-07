@@ -324,7 +324,7 @@ pub struct ETermEquation {
 
 impl Display for ETermEquation {
   fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-    write!(f, "{} === {}", self.lhs.sexp, self.rhs.sexp)
+    write!(f, "{} =?= {}", self.lhs.sexp, self.rhs.sexp)
   }
 }
 
@@ -1233,7 +1233,6 @@ impl<'a> Goal<'a> {
     }
   }
 
-  // TODO: use this?
   /// Creates cyclic lemmas from the current goal.
   fn make_cyclic_lemma_rewrites(
     &self,
@@ -1339,9 +1338,8 @@ impl<'a> Goal<'a> {
     }
     if CONFIG.verbose {
       println!("stuck guards: {stuck_guards:?}");
-      // Iterate over all stuck guard eclasses and add a new scrutinee to each
-      println!("go over stuck guards");
     }
+    // Iterate over all stuck guard eclasses and add a new scrutinee to each
     for (guard_id, subst) in stuck_guards {
       if CONFIG.verbose {
         println!("guard ID: {guard_id}");
@@ -1495,6 +1493,7 @@ impl<'a> Goal<'a> {
           .collect::<Vec<String>>()
           .join(" ")
       );
+      println!("Fill constructor: {con_app_string}");
       let con_app: Expr = con_app_string.parse().unwrap();
 
       new_goal.name = format!("{}_{}={}", new_goal.name, scrutinee.name, con_app);
@@ -1930,57 +1929,57 @@ impl<'a> Goal<'a> {
   fn ripple_out(&mut self) -> Option<Goal<'a>> {
     if CONFIG.verbose {
       println!("=== ripple_out ===");
-      println!("full expr: {}", self.full_expr);
+      println!("Full expr: {}", self.full_expr);
       self._print_lhs_rhs();
     }
 
-    let lhs = self.egraph.find(self.eq.lhs.id);
-    let rhs = self.egraph.find(self.eq.rhs.id);
+    let lhs = self.eq.lhs.id;
+    let rhs = self.eq.rhs.id;
 
+    // Only ripple when an IH exists, i.e., we are at case-split goal
     if let Some((lhs_ih, rhs_ih)) = &self.ih.clone() {
       if CONFIG.verbose {
-        println!("LHS IH:\n{lhs_ih}");
-        println!("RHS IH:\n{rhs_ih}");
+        println!("IH: {lhs_ih} == {rhs_ih}");
       }
       let (rippled_rhs_set, _) = self.get_rippled_exprs(lhs_ih, rhs_ih, lhs);
       let (rippled_lhs_set, _) = self.get_rippled_exprs(rhs_ih, lhs_ih, rhs);
 
       for rippled_rhs in rippled_rhs_set {
         if CONFIG.verbose {
-          println!("rippled RHS:");
+          println!("Rippled RHS:");
           dump_eclass_exprs(&self.egraph, rippled_rhs);
         }
         // TODO: union here or make new goal for later?
         let union_status = self.egraph.union(rhs, rippled_rhs);
         if CONFIG.verbose {
-          println!("union_status: {union_status}");
+          println!("Union_status: {union_status}");
         }
       }
 
       for rippled_lhs in rippled_lhs_set {
         if CONFIG.verbose {
-          println!("rippled LHS:");
+          println!("Rippled LHS:");
           dump_eclass_exprs(&self.egraph, rippled_lhs);
         }
         let union_status = self.egraph.union(lhs, rippled_lhs);
         if CONFIG.verbose {
-          println!("union_status: {union_status}");
+          println!("Union_status: {union_status}");
         }
       }
 
       self.egraph.rebuild();
 
       if CONFIG.verbose {
-        println!("LHS:");
+        println!("After rippling:");
         dump_eclass_exprs(&self.egraph, lhs);
-        println!("RHS:");
+        println!("=?=");
         dump_eclass_exprs(&self.egraph, rhs);
         println!("*** ripple_out ***");
       }
       return Some(self.clone());
     } else {
       if CONFIG.verbose {
-        println!("cannot ripple");
+        println!("Cannot ripple");
         println!("*** ripple_out ***");
       }
       None
@@ -2088,14 +2087,13 @@ impl<'a> Goal<'a> {
   fn decompose(&mut self, lemmas_state: &mut LemmasState, timer: &Timer) -> Option<Vec<Goal<'a>>> {
     if CONFIG.verbose {
       println!("=== decompose ===");
-      println!("full expr: {}", self.full_expr);
+      println!("Full expr: {}", self.full_expr);
     }
     let lhs = self.eq.lhs.id;
     let rhs = self.eq.rhs.id;
     if CONFIG.verbose {
-      println!("LHS:");
       dump_eclass_exprs(&self.egraph, lhs);
-      println!("RHS:");
+      println!("=?=");
       dump_eclass_exprs(&self.egraph, rhs);
     }
     let mut cache = BTreeMap::new();
@@ -2108,13 +2106,13 @@ impl<'a> Goal<'a> {
       })
       .flat_map(|au| au.extract_holes())
       .map(|hole| match hole {
-        AU::Node(_, _) => panic!("unreachable"),
+        AU::Node(_, _) => panic!("Unreachable"),
         AU::Hole((lhs, rhs)) => (*lhs, *rhs),
       })
       .collect::<Vec<_>>();
     if aus.is_empty() {
       if CONFIG.verbose {
-        println!("cannot decompose");
+        println!("Cannot decompose");
         println!("*** decompose ***");
       }
       None
@@ -2122,9 +2120,9 @@ impl<'a> Goal<'a> {
       let mut new_goals = vec![];
       for (au_lhs, au_rhs) in aus {
         if CONFIG.verbose {
-          println!("new goal:");
+          println!("Inferred lemma:");
           dump_eclass_exprs(&self.egraph, au_lhs);
-          println!("===");
+          println!("=?=");
           dump_eclass_exprs(&self.egraph, au_rhs);
         }
         let mut new_goal = self.clone();
@@ -2133,18 +2131,27 @@ impl<'a> Goal<'a> {
         new_goal.eq.lhs.id = au_lhs;
         new_goal.eq.rhs.id = au_rhs;
         if let Some(ProofLeaf::StrongFertilization()) = new_goal.find_proof() {
+          if CONFIG.verbose {
+            println!("Proof by strong fertilization");
+          }
           let (rewrites, rewrite_infos) = new_goal.make_lemma_rewrites_from_all_exprs(
             new_goal.eq.lhs.id,
             new_goal.eq.rhs.id,
             vec![],
             timer,
             lemmas_state,
+            // TODO
             false,
             false,
           );
+          // We've proven both the base case and the inductive case at this point,
+          // so add lemma as rewrite rules.
+          // println!("rewrites: {rewrites:#?}");
+          // println!("rewrite_infos: {rewrite_infos:?}");
           for rewrite_info in rewrite_infos {
             rewrite_info.add_to_rewrites(&mut lemmas_state.lemma_rewrites);
           }
+          // This should be unnecessary (the IH rewrites are already in self.lemmas)
           self.lemmas.extend(rewrites);
           continue;
         }
@@ -2198,15 +2205,19 @@ impl<'a> Goal<'a> {
       return aus;
     }
 
-    let mut child_aus = vec![];
-    for (&c1, &c2) in n1.children.iter().zip_eq(&n2.children) {
-      child_aus.push(self.au_eclass(cache, (c1, c2)));
-    }
-    for child_aus_prod in child_aus.iter().multi_cartesian_product() {
-      aus.insert(AU::Node(
-        n1.op,
-        child_aus_prod.into_iter().cloned().collect(),
-      ));
+    if n1.children.is_empty() {
+      aus.insert(AU::Node(n1.op, vec![]));
+    } else {
+      let mut child_aus = vec![];
+      for (&c1, &c2) in n1.children.iter().zip_eq(&n2.children) {
+        child_aus.push(self.au_eclass(cache, (c1, c2)));
+      }
+      for child_aus_prod in child_aus.iter().multi_cartesian_product() {
+        aus.insert(AU::Node(
+          n1.op,
+          child_aus_prod.into_iter().cloned().collect(),
+        ));
+      }
     }
 
     aus
@@ -2579,7 +2590,7 @@ impl<'a> Goal<'a> {
   }
 
   /// Debug function to search for a pair of patterns in the e-graph
-  fn debug_search_for_patterns_in_egraph(&self) {
+  fn _debug_search_for_patterns_in_egraph(&self) {
     self.global_search_state.searchers.iter().for_each(
       |searcher: &ConditionalSearcher<Pattern<SymbolLang>, Pattern<SymbolLang>>| {
         let results = searcher.search(&self.egraph);
@@ -2985,8 +2996,9 @@ impl<'a> LemmaProofState<'a> {
 
     // println!("before saturation");
     // goal._print_lhs_rhs();
-
     goal.saturate(&lemmas_state.lemma_rewrites);
+    // println!("after saturation");
+    // goal._print_lhs_rhs();
 
     if CONFIG.save_graphs {
       goal.save_egraph();
@@ -3057,7 +3069,7 @@ impl<'a> LemmaProofState<'a> {
     // It's unclear that it lets us prove that much more anyway.
     // state.add_cyclic_lemmas(&goal);
 
-    goal.debug_search_for_patterns_in_egraph();
+    // goal.debug_search_for_patterns_in_egraph();
 
     if true {
       if let Some(new_goal) = goal.ripple_out() {
@@ -3119,11 +3131,10 @@ impl<'a> LemmaProofState<'a> {
           .case_split(scrutinee, timer, lemmas_state, self.ih_lemma_number);
 
       if CONFIG.verbose {
-        println!("case split subgoals:");
         for goal in &goals {
-          println!("LHS:");
+          println!("Case-split subgoal:");
           dump_eclass_exprs(&goal.egraph, goal.eq.lhs.id);
-          println!("RHS:");
+          println!("=?=");
           dump_eclass_exprs(&goal.egraph, goal.eq.rhs.id);
         }
       }
@@ -3476,7 +3487,7 @@ impl BreadthFirstScheduler for GoalLevelPriorityQueue {
 
     if CONFIG.verbose {
       println!(
-        "\ntry goal {} from {}",
+        "\nTry goal {} from {}",
         info.full_exp, self.prop_map[&info.lemma_id]
       );
     }
@@ -3732,13 +3743,6 @@ fn find_proof(
             all_vars_consistent &= lhs_subst.get(v) == rhs_subst.get(v);
           }
           if all_vars_consistent {
-            if CONFIG.verbose {
-              println!("Strong fertilization");
-              println!("LHS:");
-              dump_eclass_exprs(egraph, resolved_lhs_id);
-              println!("RHS:");
-              dump_eclass_exprs(egraph, resolved_rhs_id);
-            }
             return Some(ProofLeaf::StrongFertilization());
           }
         }
