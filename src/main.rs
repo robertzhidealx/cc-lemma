@@ -24,11 +24,14 @@ fn main() -> Result<()> {
   result_file.iter_mut().for_each(|file| {
     file.write("name,result,time,num_lemmas,num_lemmas_attempted,num_lemmas_proven,result_cyclic,time_cyclic,num_lemmas_cyclic,num_attempted_lemmas_cyclic,num_proven_lemmas_cyclic\n".to_string().as_bytes()).expect("failed to write header");
   });
-  if CONFIG.ripple_mode {
-    println!("{}", "Rippling mode".red());
-  } else {
-    println!("{}", "CCLemma mode".red());
-  }
+  // if CONFIG.ripple_mode {
+  //   println!("{}", "Ripple mode".red());
+  // } else {
+  //   println!("{}", "CCLemma mode".red());
+  // }
+  // if let Some(timeout) = CONFIG.timeout {
+  //   println!("Timeout: {}s", timeout);
+  // }
   let mut num_goals_attempted = 0;
   let mut num_differing_goals = 0;
   let mut cyclic_num_valid = 0;
@@ -221,6 +224,7 @@ fn prove_goal<'a>(
     }
   }
   let duration = start_time.elapsed();
+  // TODO: try this
   if CONFIG.emit_proofs {
     if let Outcome::Valid = result {
       let filename = goal_name_to_filename(&goal.name);
