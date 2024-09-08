@@ -14,7 +14,7 @@ export RUST_BACKTRACE=1
 # i=1
 for file in $FOLDER; do
   echo $file
-  timeout $TIME_LIMIT cargo run --release -- --rippling "$file"
+  timeout $TIME_LIMIT cargo run --release -- --ripple "$file"
   if [ $? -eq 124 ]; then
     echo "\nTIMEOUT $TIME_LIMIT REACHED; MOVING ON"
   fi

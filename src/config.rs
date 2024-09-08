@@ -116,8 +116,8 @@ pub struct Args {
 
   #[clap(long = "reduce-proven-lemmas")]
   pub reduce_proven_lemmas: bool,
-  #[clap(long = "rippling")]
-  pub rippling_mode: bool,
+  #[clap(long = "ripple")]
+  pub ripple_mode: bool,
 }
 
 impl Args {
@@ -174,7 +174,7 @@ pub struct Config {
   pub symbolic_max_term: usize,
   pub saturate_only_parent: bool,
   pub reduce_proven_lemma: bool,
-  pub rippling_mode: bool,
+  pub ripple_mode: bool,
 }
 
 impl Config {
@@ -237,7 +237,7 @@ impl Config {
       exclude_bid_reachable: args.exclude_bid_reachable,
       saturate_only_parent: args.saturate_only_parent,
       reduce_proven_lemma: args.reduce_proven_lemmas,
-      rippling_mode: args.rippling_mode,
+      ripple_mode: args.ripple_mode,
     }
   }
 

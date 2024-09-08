@@ -24,7 +24,7 @@ fn main() -> Result<()> {
   result_file.iter_mut().for_each(|file| {
     file.write("name,result,time,num_lemmas,num_lemmas_attempted,num_lemmas_proven,result_cyclic,time_cyclic,num_lemmas_cyclic,num_attempted_lemmas_cyclic,num_proven_lemmas_cyclic\n".to_string().as_bytes()).expect("failed to write header");
   });
-  if CONFIG.rippling_mode {
+  if CONFIG.ripple_mode {
     println!("{}", "Rippling mode".red());
   } else {
     println!("{}", "CCLemma mode".red());

@@ -736,7 +736,7 @@ impl<'a> Goal<'a> {
       .iter()
       .chain(top_lemmas.values())
       .collect();
-    if !CONFIG.rippling_mode {
+    if !CONFIG.ripple_mode {
       rewrites.extend(self.lemmas.values());
     }
     // println!("rewrites: {:#?}", rewrites);
@@ -2089,7 +2089,11 @@ impl<'a> Goal<'a> {
     self.egraph.add_instantiation(&p_rhs.ast, &subst_lhs)
   }
 
-  fn decompose(&mut self, lemmas_state: &mut LemmasState, timer: &Timer) -> Option<Vec<Goal<'a>>> {
+  fn syntactic_decomp(
+    &mut self,
+    lemmas_state: &mut LemmasState,
+    timer: &Timer,
+  ) -> Option<Vec<Goal<'a>>> {
     if CONFIG.verbose {
       println!("=== decompose ===");
       println!("Full expr: {}", self.full_expr);
@@ -2137,32 +2141,9 @@ impl<'a> Goal<'a> {
       new_goal.eq.rhs.expr = RecExpr::default();
       new_goal.eq.lhs.id = au_lhs;
       new_goal.eq.rhs.id = au_rhs;
-      if let Some(ProofLeaf::StrongFertilization()) = new_goal.find_proof() {
-        if CONFIG.verbose {
-          println!("Proof by strong fertilization");
-        }
-        let (rewrites, rewrite_infos) = new_goal.make_lemma_rewrites_from_all_exprs(
-          new_goal.eq.lhs.id,
-          new_goal.eq.rhs.id,
-          vec![],
-          timer,
-          lemmas_state,
-          // TODO
-          false,
-          false,
-        );
-        // We've proven both the base case and the inductive case at this point,
-        // so add lemma as rewrite rules.
-        // println!("rewrites: {rewrites:#?}");
-        // println!("rewrite_infos: {rewrite_infos:?}");
-        for rewrite_info in rewrite_infos {
-          rewrite_info.add_to_rewrites(&mut lemmas_state.lemma_rewrites);
-        }
-        // This should be unnecessary (the IH rewrites are already in self.lemmas)
-        self.lemmas.extend(rewrites);
-        continue;
+      if !new_goal.find_strong_fertilization_proof(lemmas_state, timer) {
+        new_goals.push(new_goal);
       }
-      new_goals.push(new_goal);
     }
     if CONFIG.verbose {
       println!("*** decompose ***");
@@ -2229,16 +2210,17 @@ impl<'a> Goal<'a> {
     aus
   }
 
-  fn behavioral_decompose(
+  fn semantic_decomp(
     &mut self,
-    lemma_rewrites: &BTreeMap<String, Rw>,
+    lemmas_state: &mut LemmasState,
+    timer: &Timer,
   ) -> Option<Vec<Goal<'a>>> {
     if CONFIG.verbose {
       println!("=== behavioral_decompose ===");
     }
-    let lhs = self.egraph.find(self.eq.lhs.id);
-    let rhs = self.egraph.find(self.eq.rhs.id);
-    let lemmas = self.get_descendent_pairs_with_matching_cvecs(lhs, rhs, lemma_rewrites);
+    // Can be super slow:
+    // self.egraph.analysis.cvec_analysis.saturate();
+    let lemmas = self.get_descendent_pairs_with_matching_cvecs(&lemmas_state.lemma_rewrites);
     if lemmas.is_empty() {
       if CONFIG.verbose {
         println!("Cannot behaviorally decompose");
@@ -2253,14 +2235,17 @@ impl<'a> Goal<'a> {
       new_goal1.eq.rhs.expr = RecExpr::default();
       new_goal1.eq.lhs.id = *lhs_desc;
       new_goal1.eq.rhs.id = *rhs_desc;
-      new_goals.push(new_goal1);
+      if !new_goal1.find_strong_fertilization_proof(lemmas_state, timer) {
+        new_goals.push(new_goal1);
+      }
       let mut new_goal2 = self.clone();
       new_goal2.eq.lhs.expr = RecExpr::default();
       new_goal2.eq.rhs.expr = RecExpr::default();
       new_goal2.eq.lhs.id = *lhs_desc_fresh;
       new_goal2.eq.rhs.id = *rhs_desc_fresh;
-      new_goals.push(new_goal2);
-      // TODO: find_proof
+      if !new_goal2.find_strong_fertilization_proof(lemmas_state, timer) {
+        new_goals.push(new_goal2);
+      }
     }
     if CONFIG.verbose {
       println!("*** behavioral_decompose ***");
@@ -2270,10 +2255,10 @@ impl<'a> Goal<'a> {
 
   fn get_descendent_pairs_with_matching_cvecs(
     &mut self,
-    lhs: Id,
-    rhs: Id,
     lemma_rewrites: &BTreeMap<String, Rw>,
   ) -> Vec<((Id, Id), (Id, Id))> {
+    let lhs = self.egraph.find(self.eq.lhs.id);
+    let rhs = self.egraph.find(self.eq.rhs.id);
     // first conj equating inner exprs
     // second conj equating outer exprs
     let mut lhs_descendents = BTreeSet::new();
@@ -2317,7 +2302,10 @@ impl<'a> Goal<'a> {
       .global_search_state
       .context
       .get(&expr_sym.op)
-      .and_then(|_t| Some(_t.args_ret().1));
+      .and_then(|_t| Some(_t.args_ret().1))
+      // TODO: double check
+      .or_else(|| self.local_context.get(&expr_sym.op).cloned());
+    // println!("({expr_sym} : {_type:?})");
     if let Some(t) = _type {
       let var_name = format!(
         "{}_decomp_{}",
@@ -2332,7 +2320,10 @@ impl<'a> Goal<'a> {
         &mut cache,
         1,
       );
-      return res[0][1];
+      // TODO
+      if res[0].len() > 1 {
+        return res[0][1];
+      }
     }
     eq_side_desc
     // remember to apply rules to our newly created element, after this
@@ -2381,8 +2372,6 @@ impl<'a> Goal<'a> {
         let mut new_child_ids = vec![vec![vec![]]; n_pats];
         self.egraph.rebuild();
         for old_child_id in &node.children {
-          // warn!("new childs #: {}", new_child_ids[0].len());
-          // warn!("looking for {}", get_string_expr(egraph, *old_child_id));
           let cur_ids = self.pattern_replace_in_eclass(
             *old_child_id,
             pat_from,
@@ -2421,6 +2410,40 @@ impl<'a> Goal<'a> {
       }
     }
     cache.get(&base_id).unwrap().clone()
+  }
+
+  fn find_strong_fertilization_proof(
+    &mut self,
+    lemmas_state: &mut LemmasState,
+    timer: &Timer,
+  ) -> bool {
+    // TODO: also check for Refl proofs
+    if let Some(ProofLeaf::StrongFertilization()) = self.find_proof() {
+      if CONFIG.verbose {
+        println!("Proof by strong fertilization");
+      }
+      let (_rewrites, rewrite_infos) = self.make_lemma_rewrites_from_all_exprs(
+        self.egraph.find(self.eq.lhs.id),
+        self.egraph.find(self.eq.rhs.id),
+        vec![],
+        timer,
+        lemmas_state,
+        false,
+        false,
+      );
+      // We've proven both the base case and the inductive case at this point,
+      // so add lemma as rewrite rules.
+      // println!("rewrites: {rewrites:#?}");
+      // println!("rewrite_infos: {rewrite_infos:?}");
+      for rewrite_info in rewrite_infos {
+        rewrite_info.add_to_rewrites(&mut lemmas_state.lemma_rewrites);
+      }
+      // This should be unnecessary (the IH rewrites are already in self.lemmas)
+      // self.lemmas.extend(rewrites);
+      true
+    } else {
+      false
+    }
   }
 
   /// Used for debugging.
@@ -3022,8 +3045,8 @@ impl<'a> LemmaProofState<'a> {
         None
       }
     });
-    // HACK: This means we don't have an IH. This lemma probably should not have
-    // been considered.
+    //* HACK: This means we don't have an IH. This lemma probably should not have
+    //* been considered.
 
     if lemma_number == 0 {
       if outcome.is_none() {
@@ -3161,7 +3184,7 @@ impl<'a> LemmaProofState<'a> {
       related_lemmas.extend(lemma_indices);
     }
     // println!("searching for cc lemmas");
-    if !CONFIG.rippling_mode && CONFIG.cc_lemmas {
+    if !CONFIG.ripple_mode && CONFIG.cc_lemmas {
       let possible_lemmas = goal.search_for_cc_lemmas(timer, lemmas_state);
       let lemma_indices = lemmas_state.add_lemmas(possible_lemmas, self.proof_depth + 1);
       related_lemmas.extend(lemma_indices);
@@ -3175,16 +3198,16 @@ impl<'a> LemmaProofState<'a> {
 
     goal.egraph.rebuild();
 
-    if CONFIG.rippling_mode {
+    if CONFIG.ripple_mode {
       goal.ripple_out();
     }
 
-    if CONFIG.rippling_mode {
-      if let Some(new_goals) = goal.decompose(lemmas_state, timer) {
+    if CONFIG.ripple_mode {
+      if let Some(new_goals) = goal.syntactic_decomp(lemmas_state, timer) {
         for new_goal in new_goals {
           let (_rewrites, rewrite_infos) = new_goal.make_lemma_rewrites_from_all_exprs(
-            new_goal.eq.lhs.id,
-            new_goal.eq.rhs.id,
+            new_goal.egraph.find(new_goal.eq.lhs.id),
+            new_goal.egraph.find(new_goal.eq.rhs.id),
             vec![],
             timer,
             lemmas_state,
@@ -3201,12 +3224,12 @@ impl<'a> LemmaProofState<'a> {
       }
     }
 
-    if CONFIG.rippling_mode {
-      if let Some(new_goals) = goal.behavioral_decompose(&lemmas_state.lemma_rewrites) {
+    if CONFIG.ripple_mode {
+      if let Some(new_goals) = goal.semantic_decomp(lemmas_state, timer) {
         for new_goal in new_goals {
           let (_rewrites, rewrite_infos) = new_goal.make_lemma_rewrites_from_all_exprs(
-            new_goal.eq.lhs.id,
-            new_goal.eq.rhs.id,
+            new_goal.egraph.find(new_goal.eq.lhs.id),
+            new_goal.egraph.find(new_goal.eq.rhs.id),
             vec![],
             timer,
             lemmas_state,
@@ -3817,7 +3840,7 @@ fn find_proof(
   let resolved_rhs_id = egraph.find(eq.rhs.id);
   // Have we proven LHS == RHS?
   if resolved_lhs_id == resolved_rhs_id {
-    if CONFIG.rippling_mode {
+    if CONFIG.ripple_mode {
       let default_expr = RecExpr::default();
       if eq.lhs.expr == default_expr && eq.rhs.expr == default_expr {
         return Some(ProofLeaf::Decomposition());
