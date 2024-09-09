@@ -1221,6 +1221,7 @@ impl<'a> Goal<'a> {
       let is_var = |v| self.local_context.contains_key(v);
       let lhs_pat = to_pattern(&self.eq.lhs.expr, is_var);
       let rhs_pat = to_pattern(&self.eq.rhs.expr, is_var);
+      // TODO
       // assert!(var_set(&lhs_pat).is_subset(&var_set(&rhs_pat)));
       self.ih = Some((lhs_pat, rhs_pat));
 
@@ -3402,12 +3403,12 @@ impl<'a> ProofState<'a> {
         println!("go over each lemma in batch");
       }
       for lemma_index in lemma_batch_res.unwrap() {
-        // if self.timer.timeout() {
-        //   if CONFIG.verbose {
-        //     println!("*** prove_breadth_first ***");
-        //   }
-        //   return Outcome::Timeout;
-        // }
+        if self.timer.timeout() {
+          if CONFIG.verbose {
+            println!("*** prove_breadth_first ***");
+          }
+          return Outcome::Timeout;
+        }
         let lemma_number = scheduler.get_lemma_number(&lemma_index);
 
         if let Some(lemma_proof_state) = self.lemma_proofs.get(&lemma_number) {
