@@ -1222,7 +1222,7 @@ impl<'a> Goal<'a> {
       let lhs_pat = to_pattern(&self.eq.lhs.expr, is_var);
       let rhs_pat = to_pattern(&self.eq.rhs.expr, is_var);
       // TODO
-      // assert!(var_set(&lhs_pat).is_subset(&var_set(&rhs_pat)));
+      // assert!(var_set(&rhs_pat).is_subset(&var_set(&lhs_pat)));
       self.ih = Some((lhs_pat, rhs_pat));
 
       let lemma_rw = lemma_rw.unwrap();
@@ -2008,8 +2008,8 @@ impl<'a> Goal<'a> {
       &mut cache,
       &mut ih_replacements,
       lhs,
-      &lhs_ih,
-      &rhs_ih,
+      lhs_ih,
+      rhs_ih,
     ));
     rippled_rhs.remove(&self.egraph.find(lhs));
 
@@ -2021,50 +2021,82 @@ impl<'a> Goal<'a> {
     cache: &mut HashMap<Id, HashSet<Id>>,
     ih_replacement_vec: &mut Vec<Id>,
     lhs: Id,
-    from: &Pattern<SymbolLang>,
-    to: &Pattern<SymbolLang>,
+    lhs_ih: &Pattern<SymbolLang>,
+    rhs_ih: &Pattern<SymbolLang>,
   ) -> HashSet<Id> {
-    if let Some(inner) = cache.get(&lhs) {
-      return inner.clone();
+    if let Some(rippled_rhs) = cache.get(&lhs) {
+      return rippled_rhs.clone();
     }
     cache.insert(lhs, HashSet::from_iter([lhs]));
     let lhs_eclass = self.egraph[lhs].clone();
     self.egraph.rebuild();
-    // println!("search for {from} in LHS e-class:");
-    // print_expressions_in_eclass(&self.egraph, lhs);
-    if let Some(matches) = from.search_eclass(&self.egraph, lhs) {
+    if CONFIG.verbose {
+      println!("Search for {lhs_ih} in LHS e-class:");
+      dump_eclass_exprs(&self.egraph, lhs);
+    }
+    if let Some(matches) = lhs_ih.search_eclass(&self.egraph, lhs) {
       for subst in matches.substs {
-        // println!("found match: {subst:?}");
-        let new_id = self.add_instantiation_with_var_if_necessary(&to, subst);
+        if CONFIG.verbose {
+          println!("Found match: {subst:?}");
+        }
+        let new_id = self.add_instantiation_with_var_if_necessary(&rhs_ih, subst);
+        if CONFIG.verbose {
+          println!("After adding instantiation:");
+          dump_eclass_exprs(&self.egraph, new_id);
+        }
         cache.get_mut(&lhs).unwrap().insert(new_id);
       }
       ih_replacement_vec.push(lhs);
     } else {
       let limit = 5;
       let mut j = 0;
-      for (_node_idx, node) in lhs_eclass.nodes.iter().enumerate() {
-        let mut new_child_ids = vec![vec![]];
-        for old_child_id in &node.children {
+      if CONFIG.verbose {
+        println!("No match, go over LHS enodes");
+      }
+      for lhs_enode in lhs_eclass.nodes.iter() {
+        let mut new_children = vec![vec![]];
+        if CONFIG.verbose {
+          println!("LHS enode: {lhs_enode}");
+          println!("Go over enode children");
+        }
+        for &child in &lhs_enode.children {
+          if CONFIG.verbose {
+            println!("child:");
+            dump_eclass_exprs(&self.egraph, child);
+          }
           let mut temp = vec![];
-          let cur_ids = self.pattern_replace_in_eclass_with_analysis_help(
+          let rippled_ids = self.pattern_replace_in_eclass_with_analysis_help(
             cache,
             ih_replacement_vec,
-            *old_child_id,
-            from,
-            to,
+            child,
+            lhs_ih,
+            rhs_ih,
           );
-          for id_list in new_child_ids {
-            for id in &cur_ids {
+          if CONFIG.verbose {
+            println!("Rippled IHs:");
+            for id in &rippled_ids {
+              dump_eclass_exprs(&self.egraph, *id);
+            }
+          }
+          for id_list in new_children {
+            // println!("Go over rippled IDs");
+            for id in &rippled_ids {
+              // println!("rippled ID:");
+              // dump_eclass_exprs(&self.egraph, *id);
               let mut id_list_mod = id_list.clone();
               id_list_mod.push(id.clone());
               temp.push(id_list_mod);
             }
           }
-          new_child_ids = temp;
+          new_children = temp;
         }
-        for id_list in new_child_ids {
-          let enode = SymbolLang::new(node.op, id_list);
+        for id_list in new_children {
+          let enode = SymbolLang::new(lhs_enode.op, id_list);
           let new_id = self.egraph.add(enode);
+          if CONFIG.verbose {
+            println!("New ID:");
+            dump_eclass_exprs(&self.egraph, new_id);
+          }
           cache.get_mut(&lhs).unwrap().insert(new_id);
           if j >= limit {
             break;
@@ -2079,17 +2111,17 @@ impl<'a> Goal<'a> {
 
   fn add_instantiation_with_var_if_necessary(
     &mut self,
-    p_rhs: &Pattern<SymbolLang>,
-    mut subst_lhs: Subst,
+    rhs_ih: &Pattern<SymbolLang>,
+    mut lhs_subst: Subst,
   ) -> Id {
-    for v in p_rhs.vars() {
-      if subst_lhs.get(v) == None {
-        let assumed_v = &v.to_string()[1..v.to_string().len()]; // remove the question mark
-        let enode = SymbolLang::leaf(assumed_v);
-        subst_lhs.insert(v, self.egraph.add(enode));
+    for var in rhs_ih.vars() {
+      if lhs_subst.get(var).is_none() {
+        let free_var = var.to_string().chars().skip(1).collect::<String>();
+        let enode = SymbolLang::leaf(free_var);
+        lhs_subst.insert(var, self.egraph.add(enode));
       }
     }
-    self.egraph.add_instantiation(&p_rhs.ast, &subst_lhs)
+    self.egraph.add_instantiation(&rhs_ih.ast, &lhs_subst)
   }
 
   fn syntactic_decomp(
@@ -2213,6 +2245,7 @@ impl<'a> Goal<'a> {
     aus
   }
 
+  // TODO: log
   fn semantic_decomp(
     &mut self,
     lemmas_state: &mut LemmasState,
@@ -3699,6 +3732,14 @@ impl BreadthFirstScheduler for GoalLevelPriorityQueue {
         let state = proof_state.lemma_proofs.get_mut(&info.lemma_id).unwrap();
         state.outcome = Some(Outcome::Valid);
         println!("proved lemma {} {}", state.prop, info.full_exp);
+        println!(
+          "reason: {}",
+          state
+            .lemma_proof
+            .solved_goal_proofs
+            .get(&info.name)
+            .unwrap()
+        );
 
         if CONFIG.exclude_bid_reachable {
           state.rw_no_analysis.clone().map(|rw| {
@@ -3882,14 +3923,18 @@ fn find_proof(
           .iter()
           .cartesian_product(&rhs_matches.substs)
         {
-          let mut all_vars_consistent = true;
-          for v in lhs_ih.vars() {
-            all_vars_consistent &= lhs_subst.get(v) == rhs_subst.get(v);
+          assert!(var_set(rhs_ih).is_subset(&var_set(rhs_ih)));
+
+          if CONFIG.verbose {
+            println!("LHS subst: {:?}", lhs_subst);
+            println!("RHS subst: {:?}", rhs_subst);
           }
-          for v in rhs_ih.vars() {
-            all_vars_consistent &= lhs_subst.get(v) == rhs_subst.get(v);
-          }
-          if all_vars_consistent {
+
+          let common_vars_consistent = rhs_ih
+            .vars()
+            .iter()
+            .all(|&var| lhs_subst.get(var) == rhs_subst.get(var));
+          if common_vars_consistent {
             return Some(ProofLeaf::StrongFertilization());
           }
         }
