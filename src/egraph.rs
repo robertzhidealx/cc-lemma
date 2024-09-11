@@ -1,5 +1,5 @@
 use crate::config::CONFIG;
-use crate::utils::cartesian_product;
+use crate::utils::{cartesian_product, dump_eclass_exprs};
 use egg::*;
 use std::collections::HashMap;
 use std::{
@@ -527,4 +527,238 @@ where
   // Update the memo since we only set it to 'true' temporarily to handle cycles.
   memo.insert((*rec_expr_id, *eclass), res);
   res
+}
+
+pub fn search_wave_fronts<N>(
+  egraph: &mut EGraph<SymbolLang, N>,
+  pat: &Pattern<SymbolLang>,
+  eclass: Id,
+) -> ()
+where
+  N: Analysis<SymbolLang>,
+{
+  let pat_ref = pat.ast.as_ref();
+  let mut mismatches = BTreeSet::new();
+  let mut cache = BTreeSet::new();
+  let mut subst = HashMap::new();
+  if CONFIG.verbose {
+    println!("Before labeling:");
+    dump_eclass_exprs(egraph, eclass);
+  }
+  label_eclass(
+    egraph,
+    pat_ref,
+    pat_ref.len() - 1,
+    eclass,
+    &mut mismatches,
+    false,
+    &mut cache,
+    &mut subst,
+  );
+  if CONFIG.verbose {
+    println!("After labeling:");
+    dump_eclass_exprs(egraph, eclass);
+  }
+  let mut cache = BTreeSet::new();
+  let (rippled, _) = ripple_out_eclass(egraph, &mut cache, eclass);
+  egraph.rebuild();
+  if CONFIG.verbose {
+    println!("After rippling:");
+    dump_eclass_exprs(egraph, rippled);
+  }
+}
+
+fn ripple_out_eclass<N>(
+  egraph: &mut EGraph<SymbolLang, N>,
+  cache: &mut BTreeSet<Id>,
+  eclass: Id,
+) -> (Id, Vec<Id>)
+where
+  N: Analysis<SymbolLang>,
+{
+  // println!("cur eclass:");
+  // dump_eclass_exprs(egraph, eclass);
+  let nodes = egraph[eclass].nodes.clone();
+  let mut wave_holes = vec![];
+  for (idx, enode) in nodes.iter().enumerate() {
+    let rippled_enode = ripple_out_enode(egraph, cache, enode);
+    if rippled_enode.op.to_string().starts_with("_wave_front_") {
+      wave_holes.extend(rippled_enode.children.clone());
+      // let eclass_idx = parent.children.iter().position(|&id| id == eclass).unwrap();
+      // return wave_front_children[0];
+      // (*parent).children = (*parent)
+      //   .children
+      //   .splice(
+      //     eclass_idx..eclass_idx + 1,
+      //     wave_front_children.iter().cloned(),
+      //   )
+      //   .collect();
+      // *parent
+      // let parent_id = egraph.add(parent.clone());
+      // wave_front.children = vec![parent_id];
+      // let _wave_front_id = egraph.add(wave_front.clone());
+      // println!("ayo:");
+      // dump_eclass_exprs(egraph, _wave_front_id);
+      // **parent = wave_front;
+      // egraph[eclass].nodes[idx] =
+    } else {
+      egraph[eclass].nodes[idx] = rippled_enode;
+    }
+  }
+  // [(S [(_ih_root_plus [x_30] [(_wave_front_S [x_30])])])]
+  // [(S [(_wave_front_S [(_ih_root_plus [x_30] [x_30])])])]
+
+  (eclass, wave_holes)
+}
+
+fn ripple_out_enode<N>(
+  egraph: &mut EGraph<SymbolLang, N>,
+  cache: &mut BTreeSet<Id>,
+  enode: &SymbolLang,
+) -> SymbolLang
+where
+  N: Analysis<SymbolLang>,
+{
+  if enode.op.to_string().starts_with("_wave_front_") {
+    return enode.clone();
+  }
+  let mut new_children = vec![];
+  for &enode_child in &enode.children {
+    let (_, wave_holes) = ripple_out_eclass(egraph, cache, enode_child);
+    if wave_holes.is_empty() {
+      new_children.push(enode_child);
+    } else {
+      new_children.extend(wave_holes);
+    }
+  }
+
+  SymbolLang {
+    op: enode.op.clone(),
+    children: new_children,
+  }
+}
+
+fn label_eclass<N>(
+  egraph: &mut EGraph<SymbolLang, N>,
+  pat: &[ENodeOrVar<SymbolLang>],
+  pat_idx: usize,
+  eclass: Id,
+  mismatches: &mut BTreeSet<(usize, SymbolLang)>,
+  found_head: bool,
+  cache: &mut BTreeSet<(Id, usize)>,
+  subst: &mut HashMap<Var, SymbolLang>,
+) -> Id
+where
+  N: Analysis<SymbolLang>,
+{
+  let state = (eclass, pat_idx);
+  if cache.contains(&state) {
+    return eclass;
+  }
+  cache.insert(state);
+
+  let nodes = egraph[eclass].nodes.clone();
+  for (i, enode) in nodes.iter().enumerate() {
+    let ripple = label_enode(
+      egraph, pat, pat_idx, enode, mismatches, found_head, cache, subst,
+    );
+    egraph[eclass].nodes[i] = ripple;
+  }
+
+  eclass
+}
+
+fn label_enode<N>(
+  egraph: &mut EGraph<SymbolLang, N>,
+  pat: &[ENodeOrVar<SymbolLang>],
+  pat_idx: usize,
+  enode: &SymbolLang,
+  mismatches: &mut BTreeSet<(usize, SymbolLang)>,
+  mut found_head: bool,
+  cache: &mut BTreeSet<(Id, usize)>,
+  subst: &mut HashMap<Var, SymbolLang>,
+) -> SymbolLang
+where
+  N: Analysis<SymbolLang>,
+{
+  match &pat[pat_idx] {
+    ENodeOrVar::Var(v) => match subst.get(v) {
+      None => {
+        subst.insert(*v, enode.clone());
+        enode.clone()
+      }
+      Some(enode_seen) => {
+        if enode_seen != enode {
+          mismatches.insert((pat_idx, enode.clone()));
+          let mut new_enode = enode.clone();
+          new_enode.op = format!("_wave_front_{}", enode.op)
+            .parse::<Symbol>()
+            .unwrap();
+          new_enode
+        } else {
+          enode.clone()
+        }
+      }
+    },
+    ENodeOrVar::ENode(e) => {
+      if e.matches(enode) {
+        let mut new_op = enode.op.clone();
+        if !found_head {
+          found_head = true;
+          new_op = format!("_ih_root_{}", enode.op).parse::<Symbol>().unwrap();
+        }
+        SymbolLang::new(
+          new_op,
+          e.children
+            .iter()
+            .zip(&enode.children)
+            .map(|(&child_idx, &enode_child)| {
+              label_eclass(
+                egraph,
+                pat,
+                usize::from(child_idx),
+                enode_child,
+                mismatches,
+                found_head,
+                cache,
+                subst,
+              )
+            })
+            .collect(),
+        )
+      } else {
+        if !found_head {
+          SymbolLang::new(
+            enode.op,
+            enode
+              .children
+              .iter()
+              .map(|&enode_child| {
+                label_eclass(
+                  egraph,
+                  pat,
+                  pat_idx,
+                  enode_child,
+                  mismatches,
+                  found_head,
+                  cache,
+                  subst,
+                )
+              })
+              .collect(),
+          )
+        } else {
+          if CONFIG.verbose {
+            println!("no match");
+          }
+          mismatches.insert((pat_idx, enode.clone()));
+          let mut new_enode = enode.clone();
+          new_enode.op = format!("_wave_front_{}", enode.op)
+            .parse::<Symbol>()
+            .unwrap();
+          new_enode
+        }
+      }
+    }
+  }
 }

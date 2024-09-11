@@ -1934,15 +1934,45 @@ impl<'a> Goal<'a> {
     lemmas
   }
 
-  fn ripple_out(&mut self) {
+  fn _ripple_alt(&mut self) {
+    if CONFIG.verbose {
+      println!("=== ripple_out ===");
+    }
+    if let Some((lhs_ih, rhs_ih)) = &self.ih.clone() {
+      if CONFIG.verbose {
+        println!("IH: {lhs_ih} == {rhs_ih}");
+      }
+      let lhs = self.egraph.find(self.eq.lhs.id);
+      let rhs = self.egraph.find(self.eq.rhs.id);
+      if CONFIG.verbose {
+        println!("LHS:");
+        dump_eclass_exprs(&self.egraph, lhs);
+        println!("RHS:");
+        dump_eclass_exprs(&self.egraph, rhs);
+        println!("Ripple LHS:");
+      }
+      search_wave_fronts(&mut self.egraph, lhs_ih, lhs);
+      if CONFIG.verbose {
+        println!("Ripple RHS:");
+      }
+      search_wave_fronts(&mut self.egraph, rhs_ih, rhs);
+    } else {
+      if CONFIG.verbose {
+        println!("Cannot ripple");
+      }
+    }
+    if CONFIG.verbose {
+      println!("*** ripple_out ***");
+    }
+  }
+
+  fn ripple_out(&mut self) -> Option<Vec<Goal<'a>>> {
     if CONFIG.verbose {
       println!("=== ripple_out ===");
       println!("Full expr: {}", self.full_expr);
       self._print_lhs_rhs();
     }
 
-    // let lhs = self.eq.lhs.id;
-    // let rhs = self.eq.rhs.id;
     let lhs = self.egraph.find(self.eq.lhs.id);
     let rhs = self.egraph.find(self.eq.rhs.id);
 
@@ -1951,46 +1981,104 @@ impl<'a> Goal<'a> {
       if CONFIG.verbose {
         println!("IH: {lhs_ih} == {rhs_ih}");
       }
+      let mut new_goals = vec![];
+
       let (rippled_rhs_set, _) = self.get_rippled_exprs(lhs_ih, rhs_ih, lhs);
       let (rippled_lhs_set, _) = self.get_rippled_exprs(rhs_ih, lhs_ih, rhs);
 
-      for rippled_rhs in rippled_rhs_set {
-        if CONFIG.verbose {
-          println!("Rippled RHS:");
-          dump_eclass_exprs(&self.egraph, rippled_rhs);
-        }
-        // TODO: Union here or make new goal for later?
-        let union_status = self.egraph.union(rhs, rippled_rhs);
-        if CONFIG.verbose {
-          println!("Union_status: {union_status}");
-        }
-      }
-
-      for rippled_lhs in rippled_lhs_set {
-        if CONFIG.verbose {
-          println!("Rippled LHS:");
-          dump_eclass_exprs(&self.egraph, rippled_lhs);
-        }
-        let union_status = self.egraph.union(lhs, rippled_lhs);
-        if CONFIG.verbose {
-          println!("Union_status: {union_status}");
-        }
-      }
-
       self.egraph.rebuild();
+      self.egraph.analysis.cvec_analysis.saturate();
 
-      if CONFIG.verbose {
-        println!("After rippling:");
-        dump_eclass_exprs(&self.egraph, lhs);
-        println!("=?=");
-        dump_eclass_exprs(&self.egraph, rhs);
-        println!("*** ripple_out ***");
+      if rippled_rhs_set.is_empty() {
+        if CONFIG.verbose {
+          println!("Could not ripple RHS");
+        }
+      } else {
+        for rippled_rhs in rippled_rhs_set {
+          if CONFIG.verbose {
+            println!("Rippled RHS:");
+            dump_eclass_exprs(&self.egraph, rippled_rhs);
+          }
+          if rhs != rippled_rhs {
+            if let Some(true) = cvecs_equal(
+              &self.egraph.analysis.cvec_analysis,
+              &self.egraph[rhs].data.cvec_data,
+              &self.egraph[rippled_rhs].data.cvec_data,
+            ) {
+              let mut new_goal = self.clone();
+              new_goal.eq.lhs.expr = RecExpr::default();
+              new_goal.eq.lhs.id = rippled_rhs;
+              if CONFIG.verbose {
+                println!("new goal:\n---");
+                dump_eclass_exprs(&new_goal.egraph, new_goal.eq.lhs.id);
+                println!("=?=");
+                dump_eclass_exprs(&new_goal.egraph, new_goal.eq.rhs.id);
+                println!("---");
+              }
+              new_goals.push(new_goal);
+              // let union_status = self.egraph.union(rhs, rippled_rhs);
+              // if CONFIG.verbose {
+              //   println!("Union_status: {union_status}");
+              // }
+            }
+          }
+        }
       }
+
+      if rippled_lhs_set.is_empty() {
+        if CONFIG.verbose {
+          println!("Could not ripple LHS");
+        }
+      } else {
+        for rippled_lhs in rippled_lhs_set {
+          if CONFIG.verbose {
+            println!("Rippled LHS:");
+            dump_eclass_exprs(&self.egraph, rippled_lhs);
+          }
+          if lhs != rippled_lhs {
+            if let Some(true) = cvecs_equal(
+              &self.egraph.analysis.cvec_analysis,
+              &self.egraph[lhs].data.cvec_data,
+              &self.egraph[rippled_lhs].data.cvec_data,
+            ) {
+              let mut new_goal = self.clone();
+              new_goal.eq.rhs.expr = RecExpr::default();
+              new_goal.eq.rhs.id = rippled_lhs;
+              if CONFIG.verbose {
+                println!("new goal:\n---");
+                dump_eclass_exprs(&new_goal.egraph, new_goal.eq.lhs.id);
+                println!("=?=");
+                dump_eclass_exprs(&new_goal.egraph, new_goal.eq.rhs.id);
+                println!("---");
+              }
+              new_goals.push(new_goal);
+              // let union_status = self.egraph.union(lhs, rippled_lhs);
+              // if CONFIG.verbose {
+              //   println!("Union_status: {union_status}");
+              // }
+            }
+          }
+        }
+      }
+
+      // self.egraph.rebuild();
+
+      // if CONFIG.verbose {
+      //   println!("After rippling:");
+      //   dump_eclass_exprs(&self.egraph, lhs);
+      //   println!("=?=");
+      //   dump_eclass_exprs(&self.egraph, rhs);
+      //   println!("*** ripple_out ***");
+      // }
+
+      Some(new_goals)
     } else {
       if CONFIG.verbose {
         println!("Cannot ripple");
         println!("*** ripple_out ***");
       }
+
+      None
     }
   }
 
@@ -2030,17 +2118,17 @@ impl<'a> Goal<'a> {
     cache.insert(lhs, HashSet::from_iter([lhs]));
     let lhs_eclass = self.egraph[lhs].clone();
     self.egraph.rebuild();
-    if CONFIG.verbose {
+    if false && CONFIG.verbose {
       println!("Search for {lhs_ih} in LHS e-class:");
       dump_eclass_exprs(&self.egraph, lhs);
     }
     if let Some(matches) = lhs_ih.search_eclass(&self.egraph, lhs) {
       for subst in matches.substs {
-        if CONFIG.verbose {
+        if false && CONFIG.verbose {
           println!("Found match: {subst:?}");
         }
         let new_id = self.add_instantiation_with_var_if_necessary(&rhs_ih, subst);
-        if CONFIG.verbose {
+        if false && CONFIG.verbose {
           println!("After adding instantiation:");
           dump_eclass_exprs(&self.egraph, new_id);
         }
@@ -2050,17 +2138,17 @@ impl<'a> Goal<'a> {
     } else {
       let limit = 5;
       let mut j = 0;
-      if CONFIG.verbose {
+      if false && CONFIG.verbose {
         println!("No match, go over LHS enodes");
       }
       for lhs_enode in lhs_eclass.nodes.iter() {
         let mut new_children = vec![vec![]];
-        if CONFIG.verbose {
+        if false && CONFIG.verbose {
           println!("LHS enode: {lhs_enode}");
           println!("Go over enode children");
         }
         for &child in &lhs_enode.children {
-          if CONFIG.verbose {
+          if false && CONFIG.verbose {
             println!("child:");
             dump_eclass_exprs(&self.egraph, child);
           }
@@ -2072,7 +2160,7 @@ impl<'a> Goal<'a> {
             lhs_ih,
             rhs_ih,
           );
-          if CONFIG.verbose {
+          if false && CONFIG.verbose {
             println!("Rippled IHs:");
             for id in &rippled_ids {
               dump_eclass_exprs(&self.egraph, *id);
@@ -2093,7 +2181,7 @@ impl<'a> Goal<'a> {
         for id_list in new_children {
           let enode = SymbolLang::new(lhs_enode.op, id_list);
           let new_id = self.egraph.add(enode);
-          if CONFIG.verbose {
+          if false && CONFIG.verbose {
             println!("New ID:");
             dump_eclass_exprs(&self.egraph, new_id);
           }
@@ -2133,8 +2221,6 @@ impl<'a> Goal<'a> {
       println!("=== syntactic_decomp ===");
       println!("Full expr: {}", self.full_expr);
     }
-    // let lhs = self.eq.lhs.id;
-    // let rhs = self.eq.rhs.id;
     let lhs = self.egraph.find(self.eq.lhs.id);
     let rhs = self.egraph.find(self.eq.rhs.id);
     if CONFIG.verbose {
@@ -2315,23 +2401,27 @@ impl<'a> Goal<'a> {
       if timer.timeout() {
         return lemmas;
       }
-      if lhs_desc != rhs_desc
-        && (lhs_desc != lhs && rhs_desc != rhs)
-        && self.egraph[lhs_desc].data.cvec_data == self.egraph[rhs_desc].data.cvec_data
-      {
-        let lhs_desc_outer = self.replace_subexpr_with_fresh_var(lhs, lhs_desc);
-        let rhs_desc_outer = self.replace_subexpr_with_fresh_var(rhs, rhs_desc);
-        self.saturate(lemma_rewrites);
-        if self.egraph[lhs_desc_outer].data.cvec_data == self.egraph[rhs_desc_outer].data.cvec_data
-          && lhs_desc_outer != rhs_desc_outer
-        {
-          // lhs = lhs_desc_outer lhs_desc
-          // rhs = rhs_desc_outer rhs_desc
-          //   eclass(lhs_desc != rhs_desc)
-          // but cvec(lhs_desc == rhs_desc)
-          //   eclass(lhs_desc_outer != rhs_desc_outer)
-          // but cvec(lhs_desc_outer == rhs_desc_outer)
-          lemmas.push(((lhs_desc, rhs_desc), (lhs_desc_outer, rhs_desc_outer)));
+      if lhs_desc != rhs_desc && (lhs_desc != lhs && rhs_desc != rhs) {
+        if let Some(true) = cvecs_equal(
+          &self.egraph.analysis.cvec_analysis,
+          &self.egraph[lhs_desc].data.cvec_data,
+          &self.egraph[rhs_desc].data.cvec_data,
+        ) {
+          let lhs_desc_outer = self.replace_subexpr_with_fresh_var(lhs, lhs_desc);
+          let rhs_desc_outer = self.replace_subexpr_with_fresh_var(rhs, rhs_desc);
+          self.saturate(lemma_rewrites);
+          if self.egraph[lhs_desc_outer].data.cvec_data
+            == self.egraph[rhs_desc_outer].data.cvec_data
+            && lhs_desc_outer != rhs_desc_outer
+          {
+            // lhs = lhs_desc_outer lhs_desc
+            // rhs = rhs_desc_outer rhs_desc
+            //   eclass(lhs_desc != rhs_desc)
+            // but cvec(lhs_desc == rhs_desc)
+            //   eclass(lhs_desc_outer != rhs_desc_outer)
+            // but cvec(lhs_desc_outer == rhs_desc_outer)
+            lemmas.push(((lhs_desc, rhs_desc), (lhs_desc_outer, rhs_desc_outer)));
+          }
         }
       }
     }
@@ -3247,7 +3337,34 @@ impl<'a> LemmaProofState<'a> {
     goal.egraph.rebuild();
 
     if CONFIG.ripple_mode {
-      goal.ripple_out();
+      if let Some(new_goals) = goal.ripple_out() {
+        for new_goal in new_goals {
+          let (_rewrites, rewrite_infos) = new_goal.make_lemma_rewrites_from_all_exprs(
+            new_goal.egraph.find(new_goal.eq.lhs.id),
+            new_goal.egraph.find(new_goal.eq.rhs.id),
+            vec![],
+            timer,
+            lemmas_state,
+            false,
+            false,
+          );
+          let new_rewrite_eqs = rewrite_infos
+            .into_iter()
+            .map(|rw_info| rw_info.lemma_prop.clone())
+            .collect::<Vec<_>>();
+          let mut possible_lemmas = vec![];
+          let fresh_name = format!("fresh_{}_{}", new_goal.name, new_goal.egraph.total_size());
+          for prop in &new_rewrite_eqs {
+            possible_lemmas.extend(find_generalizations_prop(
+              prop,
+              new_goal.global_search_state.context,
+              fresh_name.clone(),
+            ));
+          }
+          let lemma_indices = lemmas_state.add_lemmas(possible_lemmas, self.proof_depth + 1);
+          related_lemmas.extend(lemma_indices);
+        }
+      }
     }
 
     if CONFIG.ripple_mode {
@@ -3295,6 +3412,10 @@ impl<'a> LemmaProofState<'a> {
         }
       }
     }
+
+    // if CONFIG.ripple_mode {
+    //   goal.actual_ripple();
+    // }
 
     if let Some(scrutinee) = goal.next_scrutinee(blocking_vars) {
       if CONFIG.verbose {
@@ -3732,14 +3853,14 @@ impl BreadthFirstScheduler for GoalLevelPriorityQueue {
         let state = proof_state.lemma_proofs.get_mut(&info.lemma_id).unwrap();
         state.outcome = Some(Outcome::Valid);
         println!("proved lemma {} {}", state.prop, info.full_exp);
-        println!(
-          "reason: {}",
-          state
-            .lemma_proof
-            .solved_goal_proofs
-            .get(&info.name)
-            .unwrap()
-        );
+        // println!(
+        //   "reason: {}",
+        //   state
+        //     .lemma_proof
+        //     .solved_goal_proofs
+        //     .get(&info.name)
+        //     .unwrap()
+        // );
 
         if CONFIG.exclude_bid_reachable {
           state.rw_no_analysis.clone().map(|rw| {
@@ -3923,16 +4044,15 @@ fn find_proof(
           .iter()
           .cartesian_product(&rhs_matches.substs)
         {
-          assert!(var_set(rhs_ih).is_subset(&var_set(rhs_ih)));
-
           if CONFIG.verbose {
             println!("LHS subst: {:?}", lhs_subst);
             println!("RHS subst: {:?}", rhs_subst);
           }
 
-          let common_vars_consistent = rhs_ih
-            .vars()
-            .iter()
+          let common_vars_consistent = var_set(rhs_ih)
+            .union(&var_set(lhs_ih))
+            .collect::<Vec<_>>()
+            .into_iter()
             .all(|&var| lhs_subst.get(var) == rhs_subst.get(var));
           if common_vars_consistent {
             return Some(ProofLeaf::StrongFertilization());
