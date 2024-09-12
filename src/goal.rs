@@ -2331,7 +2331,6 @@ impl<'a> Goal<'a> {
     aus
   }
 
-  // TODO: log
   fn semantic_decomp(
     &mut self,
     lemmas_state: &mut LemmasState,
@@ -2351,6 +2350,9 @@ impl<'a> Goal<'a> {
       return None;
     }
     let mut new_goals = vec![];
+    if CONFIG.verbose {
+      println!("Go over lemmas:");
+    }
     for ((lhs_desc, rhs_desc), (lhs_desc_outer, rhs_desc_outer)) in &lemmas {
       // TODO: May have to turn off:
       if timer.timeout() {
@@ -2361,6 +2363,12 @@ impl<'a> Goal<'a> {
       new_goal1.eq.rhs.expr = RecExpr::default();
       new_goal1.eq.lhs.id = *lhs_desc;
       new_goal1.eq.rhs.id = *rhs_desc;
+      if CONFIG.verbose {
+        println!("New goal 1:");
+        dump_eclass_exprs(&self.egraph, *lhs_desc);
+        println!("=?=");
+        dump_eclass_exprs(&self.egraph, *rhs_desc);
+      }
       if !new_goal1.try_finish_decomp(lemmas_state, timer) {
         new_goals.push(new_goal1);
       }
@@ -2369,6 +2377,12 @@ impl<'a> Goal<'a> {
       new_goal2.eq.rhs.expr = RecExpr::default();
       new_goal2.eq.lhs.id = *lhs_desc_outer;
       new_goal2.eq.rhs.id = *rhs_desc_outer;
+      if CONFIG.verbose {
+        println!("New goal 2:");
+        dump_eclass_exprs(&self.egraph, *lhs_desc_outer);
+        println!("=?=");
+        dump_eclass_exprs(&self.egraph, *rhs_desc_outer);
+      }
       // TODO: We both benefit from and are constrained by the goal graph framework here:
       // We have to return both new goals instead of short-circuiting
       if !new_goal2.try_finish_decomp(lemmas_state, timer) {
@@ -2388,11 +2402,21 @@ impl<'a> Goal<'a> {
   ) -> Vec<((Id, Id), (Id, Id))> {
     let lhs = self.egraph.find(self.eq.lhs.id);
     let rhs = self.egraph.find(self.eq.rhs.id);
+    if CONFIG.verbose {
+      println!("=== get_descendent_pairs_with_matching_cvecs ===");
+      println!("Goal:");
+      dump_eclass_exprs(&self.egraph, lhs);
+      println!("=?=");
+      dump_eclass_exprs(&self.egraph, rhs);
+    }
     let mut lhs_descendents = BTreeSet::new();
     let mut rhs_descendents = BTreeSet::new();
     self.compute_descendents(lhs, &mut lhs_descendents);
     self.compute_descendents(rhs, &mut rhs_descendents);
     let mut lemmas = vec![];
+    if CONFIG.verbose {
+      println!("Go over all descendent pairs:");
+    }
     for (&lhs_desc, &rhs_desc) in lhs_descendents
       .iter()
       .cartesian_product(rhs_descendents.iter())
@@ -2407,28 +2431,55 @@ impl<'a> Goal<'a> {
           &self.egraph[lhs_desc].data.cvec_data,
           &self.egraph[rhs_desc].data.cvec_data,
         ) {
+          if CONFIG.verbose {
+            println!("Descendent pair:");
+            dump_eclass_exprs(&self.egraph, lhs_desc);
+            println!("=?=");
+            dump_eclass_exprs(&self.egraph, rhs_desc);
+          }
           let lhs_desc_outer = self.replace_subexpr_with_fresh_var(lhs, lhs_desc);
           let rhs_desc_outer = self.replace_subexpr_with_fresh_var(rhs, rhs_desc);
-          self.saturate(lemma_rewrites);
-          if self.egraph[lhs_desc_outer].data.cvec_data
-            == self.egraph[rhs_desc_outer].data.cvec_data
-            && lhs_desc_outer != rhs_desc_outer
-          {
-            // lhs = lhs_desc_outer lhs_desc
-            // rhs = rhs_desc_outer rhs_desc
-            //   eclass(lhs_desc != rhs_desc)
-            // but cvec(lhs_desc == rhs_desc)
-            //   eclass(lhs_desc_outer != rhs_desc_outer)
-            // but cvec(lhs_desc_outer == rhs_desc_outer)
-            lemmas.push(((lhs_desc, rhs_desc), (lhs_desc_outer, rhs_desc_outer)));
+          // self.saturate(lemma_rewrites);
+          self.egraph.rebuild();
+          // self.egraph.analysis.cvec_analysis.saturate();
+          if CONFIG.verbose {
+            println!("Descendent outer pair:");
+            dump_eclass_exprs(&self.egraph, lhs_desc_outer);
+            println!("=?=");
+            dump_eclass_exprs(&self.egraph, rhs_desc_outer);
+          }
+          if lhs_desc_outer != rhs_desc_outer {
+            if let Some(true) = cvecs_equal(
+              &self.egraph.analysis.cvec_analysis,
+              &self.egraph[lhs_desc_outer].data.cvec_data,
+              &self.egraph[rhs_desc_outer].data.cvec_data,
+            ) {
+              println!("ayo");
+              // lhs = lhs_desc_outer lhs_desc
+              // rhs = rhs_desc_outer rhs_desc
+              //   eclass(lhs_desc != rhs_desc)
+              // but cvec(lhs_desc == rhs_desc)
+              //   eclass(lhs_desc_outer != rhs_desc_outer)
+              // but cvec(lhs_desc_outer == rhs_desc_outer)
+              if CONFIG.verbose {
+                println!("Cvecs match, add pairs as lemma");
+              }
+              lemmas.push(((lhs_desc, rhs_desc), (lhs_desc_outer, rhs_desc_outer)));
+            }
           }
         }
       }
+    }
+    if CONFIG.verbose {
+      println!("*** get_descendent_pairs_with_matching_cvecs ***");
     }
     lemmas
   }
 
   fn replace_subexpr_with_fresh_var(&mut self, eq_side: Id, eq_side_desc: Id) -> Id {
+    if CONFIG.verbose {
+      // println!("=== replace_subexpr_with_fresh_var ===");
+    }
     let mut cache = HashMap::new();
     let expr_temp = self.egraph.id_to_expr(eq_side_desc);
     let expr_ref = expr_temp.as_ref();
@@ -2457,8 +2508,14 @@ impl<'a> Goal<'a> {
       );
       // TODO
       if res[0].len() > 1 {
+        if CONFIG.verbose {
+          // println!("*** replace_subexpr_with_fresh_var ***");
+        }
         return res[0][1];
       }
+    }
+    if CONFIG.verbose {
+      // println!("*** replace_subexpr_with_fresh_var ***");
     }
     eq_side_desc
     // remember to apply rules to our newly created element, after this
@@ -4044,16 +4101,31 @@ fn find_proof(
           .iter()
           .cartesian_product(&rhs_matches.substs)
         {
-          if CONFIG.verbose {
+          // let lhs_ih_vars = var_set(lhs_ih);
+          // let rhs_ih_vars = var_set(rhs_ih);
+          if CONFIG.verbose
+          // && lhs_ih_vars.is_subset(&rhs_ih_vars)
+          // && lhs_ih_vars.len() != rhs_ih_vars.len()
+          {
+            // println!("LHS IH: {lhs_ih}");
+            // println!("RHS IH: {rhs_ih}");
             println!("LHS subst: {:?}", lhs_subst);
             println!("RHS subst: {:?}", rhs_subst);
+            // println!("LHS:");
+            // dump_eclass_exprs(egraph, resolved_lhs_id);
+            // println!("RHS:");
+            // dump_eclass_exprs(egraph, resolved_rhs_id);
           }
+          // assert!(&var_set(rhs_ih).is_subset(&var_set(lhs_ih)));
 
           let common_vars_consistent = var_set(rhs_ih)
             .union(&var_set(lhs_ih))
             .collect::<Vec<_>>()
             .into_iter()
             .all(|&var| lhs_subst.get(var) == rhs_subst.get(var));
+          // let common_vars_consistent = var_set(rhs_ih)
+          //   .into_iter()
+          //   .all(|var| lhs_subst.get(var) == rhs_subst.get(var));
           if common_vars_consistent {
             return Some(ProofLeaf::StrongFertilization());
           }
