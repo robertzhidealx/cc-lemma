@@ -2388,6 +2388,7 @@ impl<'a> Goal<'a> {
       }
       // TODO: We both benefit from and are constrained by the goal graph framework here:
       // We have to return both new goals instead of short-circuiting
+      // TODO: Must try to first discharge new_goal1 here
       if !new_goal2.try_finish_decomp(lemmas_state, timer) {
         if CONFIG.verbose {
           println!("New goal 2 not proven, add as lemma");
