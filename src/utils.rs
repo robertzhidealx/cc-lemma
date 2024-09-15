@@ -1,7 +1,7 @@
 use colored::Colorize;
 use std::collections::{HashMap, HashSet, VecDeque};
 
-use crate::{analysis::CycleggAnalysis, egraph::get_all_expressions};
+use crate::{analysis::CycleggAnalysis, ast::sexp_size, egraph::get_all_expressions};
 use egg::*;
 use itertools::Itertools;
 use log::warn;
@@ -61,10 +61,7 @@ pub fn dump_eclass_exprs<L: egg::Language + std::fmt::Display, N: egg::Analysis<
   id: Id,
 ) {
   let id = egraph.find(id);
-
-  let exprs = get_all_expressions(egraph, vec![id]);
-
-  for expr in exprs.get(&id).unwrap() {
+  for expr in &get_all_expressions(egraph, vec![id])[&id] {
     println!("{expr}");
   }
 }
@@ -475,4 +472,14 @@ where
   pub fn first(&self) -> &T {
     self.chain.front().unwrap()
   }
+}
+
+pub fn get_smallest_expr(exprs: &Vec<RecExpr<SymbolLang>>) -> RecExpr<SymbolLang> {
+  exprs
+    .iter()
+    .min_by_key(|expr| {
+      sexp_size(&symbolic_expressions::parser::parse_str(expr.to_string().as_str()).unwrap())
+    })
+    .cloned()
+    .unwrap_or(RecExpr::default())
 }
