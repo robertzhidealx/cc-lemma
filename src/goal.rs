@@ -221,7 +221,7 @@ impl<'a> SearchCondition<SymbolLang, CycleggAnalysis> for TypeRestriction {
 }
 
 #[derive(Clone)]
-struct SoundnessWithType {
+pub struct SoundnessWithType {
   soundness: Option<Soundness>,
   type_cons: Option<TypeRestriction>,
 }
@@ -1994,7 +1994,7 @@ impl<'a> Goal<'a> {
   //   }
   // }
 
-  fn ripple_out(&mut self) -> Option<Vec<Goal<'a>>> {
+  fn ripple_out(&mut self, lemmas_state: &mut LemmasState, timer: &Timer) -> Option<Vec<Goal<'a>>> {
     if CONFIG.verbose {
       println!("=== ripple_out ===");
       println!("Full expr: {}", self.full_expr);
@@ -2059,7 +2059,12 @@ impl<'a> Goal<'a> {
               println!("=?=");
               dump_eclass_exprs(&new_goal.egraph, new_goal.eq.rhs.id);
             }
-            new_goals.push(new_goal);
+            if !new_goal.try_fertilize(lemmas_state, timer) {
+              if CONFIG.verbose {
+                println!("New goal not proven, queue up as lemma");
+              }
+              new_goals.push(new_goal);
+            }
           }
         }
       }
@@ -2106,7 +2111,12 @@ impl<'a> Goal<'a> {
               println!("=?=");
               dump_eclass_exprs(&new_goal.egraph, new_goal.eq.rhs.id);
             }
-            new_goals.push(new_goal);
+            if !new_goal.try_fertilize(lemmas_state, timer) {
+              if CONFIG.verbose {
+                println!("New goal not proven, queue up as lemma");
+              }
+              new_goals.push(new_goal);
+            }
           }
         }
       }
@@ -2332,7 +2342,10 @@ impl<'a> Goal<'a> {
       new_goal.eq.rhs.expr = smallest_au_rhs_expr;
       new_goal.eq.lhs.id = au_lhs;
       new_goal.eq.rhs.id = au_rhs;
-      if !new_goal.try_finish_decomp(lemmas_state, timer) {
+      if !new_goal.try_fertilize(lemmas_state, timer) {
+        if CONFIG.verbose {
+          println!("New goal not proven, queue up as lemma");
+        }
         new_goals.push(new_goal);
       }
     }
@@ -2466,9 +2479,9 @@ impl<'a> Goal<'a> {
         println!("New goal: {new_goal}");
       }
 
-      if !new_goal.try_finish_decomp(lemmas_state, timer) {
+      if !new_goal.try_fertilize(lemmas_state, timer) {
         if CONFIG.verbose {
-          println!("New goal not proven, add as lemma");
+          println!("New goal not proven, queue up as lemma");
         }
         // We guarantee that the *smaller* inner descendent lemma is attempted before the outer one
         new_goals.push(new_goal);
@@ -2714,17 +2727,15 @@ impl<'a> Goal<'a> {
     cache.get(&base_id).unwrap().clone()
   }
 
-  fn try_finish_decomp(&mut self, lemmas_state: &mut LemmasState, timer: &Timer) -> bool {
+  fn try_fertilize(&mut self, lemmas_state: &mut LemmasState, timer: &Timer) -> bool {
     if let Some(proof) = self.find_proof() {
       match proof {
         ProofLeaf::Refl(_) => {
           panic!("Goals inferred from decompositions should never be proven by reflexivity");
         }
-        ProofLeaf::StrongFertilization()
-        // TODO: This case may no longer be necessary
-        | ProofLeaf::Decomposition() => {
+        ProofLeaf::StrongFertilization() => {
           if CONFIG.verbose {
-            println!("Proof by strong fertilization or decomposition");
+            println!("Proof by strong fertilization");
           }
           let (rewrites, rewrite_infos) = self.make_lemma_rewrites_from_all_exprs(
             self.eq.lhs.id,
@@ -3182,8 +3193,6 @@ pub enum ProofLeaf {
   Refl(Explanation<SymbolLang>),
   /// Proof by strong fertilization
   StrongFertilization(),
-  /// Proof by decomposition
-  Decomposition(),
   /// Contradiction shown (e.g. True = False)
   Contradiction(Explanation<SymbolLang>),
   /// Unimplemented proof type (will crash on proof emission)
@@ -3195,7 +3204,6 @@ impl ProofLeaf {
     match &self {
       Self::Refl(_) => "Refl".to_string(),
       Self::StrongFertilization() => "Fertilization".to_string(),
-      Self::Decomposition() => "Decomposition".to_string(),
       Self::Contradiction(_) => "Contradiction".to_string(),
       Self::Todo => "TODO".to_string(),
     }
@@ -3207,7 +3215,6 @@ impl std::fmt::Display for ProofLeaf {
     match self {
       ProofLeaf::Refl(expl) => write!(f, "{}", expl.get_string()),
       ProofLeaf::StrongFertilization() => write!(f, "Proof by strong fertilization"),
-      ProofLeaf::Decomposition() => write!(f, "Proof by decomposition"),
       ProofLeaf::Contradiction(expl) => write!(f, "{}", expl.get_string()),
       ProofLeaf::Todo => write!(f, "TODO: proof"),
     }
@@ -3499,7 +3506,7 @@ impl<'a> LemmaProofState<'a> {
 
     let mut ripple_out_success = false;
     if CONFIG.ripple_mode {
-      if let Some(new_goals) = goal.ripple_out() {
+      if let Some(new_goals) = goal.ripple_out(lemmas_state, timer) {
         ripple_out_success = true;
         for new_goal in new_goals {
           let (_rewrites, rewrite_infos) = new_goal.make_lemma_rewrites_from_all_exprs(
@@ -3516,7 +3523,7 @@ impl<'a> LemmaProofState<'a> {
             .into_iter()
             .map(|rw_info| rw_info.lemma_prop.clone())
             .collect::<Vec<_>>();
-          // Turns out it's a net negative to generalize too much. It leads to too many lemmas and sometimes leads to timeouts
+          //* Turns out it's a net negative to generalize too much. It leads to too many lemmas and sometimes timeouts
           // let mut possible_lemmas = vec![];
           // let fresh_name = format!("fresh_{}_{}", new_goal.name, new_goal.egraph.total_size());
           // for prop in &new_rewrite_eqs {
@@ -4228,14 +4235,6 @@ fn find_proof(
   let resolved_rhs_id = egraph.find(eq.rhs.id);
   // Have we proven LHS == RHS?
   if resolved_lhs_id == resolved_rhs_id {
-    // TODO: This may no longer be necessary
-    if CONFIG.ripple_mode {
-      let default_expr = RecExpr::default();
-      if eq.lhs.expr == default_expr && eq.rhs.expr == default_expr {
-        panic!("ayo");
-        return Some(ProofLeaf::Decomposition());
-      }
-    }
     if egraph.lookup_expr(&eq.lhs.expr).is_none() || egraph.lookup_expr(&eq.rhs.expr).is_none() {
       panic!(
         "One of {} or {} was removed from the e-graph! We can't emit a proof",
