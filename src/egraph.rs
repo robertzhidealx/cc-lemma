@@ -267,6 +267,7 @@ where
 }
 
 /// Conditional searcher
+#[derive(Clone, Debug)]
 pub struct ConditionalSearcher<C, S> {
   /// The searcher we apply first
   pub searcher: S,
