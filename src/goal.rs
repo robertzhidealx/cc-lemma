@@ -24,6 +24,10 @@ use crate::utils::*;
 pub type Eg = EGraph<SymbolLang, CycleggAnalysis>;
 pub type Rw = Rewrite<SymbolLang, CycleggAnalysis>;
 pub type CvecRw = Rewrite<SymbolLang, ()>;
+type IH = (
+  ConditionalSearcher<SoundnessWithType, Pattern<SymbolLang>>,
+  ConditionalSearcher<SoundnessWithType, Pattern<SymbolLang>>,
+);
 
 /// A special scrutinee name used to signal that case split bound has been exceeded
 pub const LEMMA_PREFIX: &str = "lemma";
@@ -64,18 +68,21 @@ impl Soundness {
   fn smaller_tuple(
     &self,
     triples: &Vec<(Symbol, Expr, Expr)>,
-    _blocking_vars: &BTreeSet<Symbol>,
+    blocking_vars: &BTreeSet<Symbol>,
   ) -> bool {
     let mut has_strictly_smaller = false;
-    for (_, orig, new) in triples {
+    for (x, orig, new) in triples {
       match is_subterm(new, orig) {
         StructuralComparison::LT => {
+          has_strictly_smaller = true;
+        }
+        StructuralComparison::LE if !blocking_vars.contains(x) => {
           has_strictly_smaller = true;
         }
         StructuralComparison::Incomparable => {
           return false;
         }
-        _ => (),
+        _ => {}
       }
     }
     has_strictly_smaller
@@ -151,15 +158,21 @@ impl SearchCondition<SymbolLang, CycleggAnalysis> for Soundness {
       .free_vars
       .iter()
       .map(|(x, orig_id)| {
-        let v = to_wildcard(x);
-        // Subst must have all lemma variables defined
-        // because we did the filtering when creating SmallerVars
-        let new_id = subst.get(v).unwrap();
         // Exit early with something guaranteed to be LE if this var is not blocking
         if CONFIG.better_termination && !egraph.analysis.case_split_vars.contains(x) {
           // FIXME: we need to give the actual value here
           return Some((*x, vec![].into(), vec![].into()));
         }
+        let v = to_wildcard(x);
+        // Subst must have all lemma variables defined
+        // because we did the filtering when creating SmallerVars
+        // if CONFIG.verbose {
+        //   println!("subst {:?}", subst);
+        //   println!("var: {}", v);
+        //   println!("eclass: {}", _eclass);
+        //   dump_eclass_exprs(egraph, _eclass);
+        // }
+        let new_id = subst.get(v)?;
         // If the actual argument of the lemma is not canonical, give up
         let new_canonical = CanonicalFormAnalysis::extract_canonical(egraph, *new_id)?;
         // Same for the original argument:
@@ -622,10 +635,7 @@ pub struct Goal<'a> {
   /// added by Ruyi: to get the size after case split
   pub full_expr: Equation,
   /// Induction hypothesis
-  pub ih: (
-    Option<ConditionalSearcher<SoundnessWithType, Pattern<SymbolLang>>>,
-    Option<ConditionalSearcher<SoundnessWithType, Pattern<SymbolLang>>>,
-  ),
+  pub ih: Option<IH>,
 }
 
 impl<'a> Goal<'a> {
@@ -661,7 +671,7 @@ impl<'a> Goal<'a> {
       premises: premise.into_iter().collect(),
       global_search_state,
       full_expr: prop.eq.clone(),
-      ih: (None, None),
+      ih: None,
     };
     // TODO: this could really also be a reference. Probably not necessary
     // for efficiency reason but yeah.
@@ -867,11 +877,7 @@ impl<'a> Goal<'a> {
     premises: &Vec<ETermEquation>,
     lemma_number: usize,
     exclude_wildcards: bool,
-  ) -> (
-    Option<LemmaRewrite<CycleggAnalysis>>,
-    Option<ConditionalSearcher<SoundnessWithType, Pattern<SymbolLang>>>,
-    Option<ConditionalSearcher<SoundnessWithType, Pattern<SymbolLang>>>,
-  ) {
+  ) -> (Option<LemmaRewrite<CycleggAnalysis>>, Option<IH>) {
     let is_var = |v| self.local_context.contains_key(v);
 
     // NOTE: (CK) Before we would not recreate the lhs from lhs_expr every time
@@ -891,14 +897,14 @@ impl<'a> Goal<'a> {
     if (CONFIG.irreducible_only && self.is_reducible(lhs_expr))
       || (exclude_wildcards && has_guard_wildcards(&lhs))
     {
-      return (None, None, None);
+      return (None, None);
     }
 
     let rhs: Pattern<SymbolLang> = to_pattern(rhs_expr, is_var);
     if (CONFIG.irreducible_only && self.is_reducible(rhs_expr))
       || (exclude_wildcards && has_guard_wildcards(&rhs))
     {
-      return (None, None, None);
+      return (None, None);
     }
 
     let lhs_vars = var_set(&lhs);
@@ -917,7 +923,7 @@ impl<'a> Goal<'a> {
         premise_lhs_vars.union(&premise_rhs_vars).cloned().collect();
       premise_vars.is_subset(&lemma_vars)
     }) {
-      return (None, None, None);
+      return (None, None);
     }
 
     // Pick out those variables that occur in the lemma
@@ -966,7 +972,7 @@ impl<'a> Goal<'a> {
       lemma_rw.lhs_to_rhs = Some(lhs_to_rhs);
 
       if CONFIG.single_rhs {
-        return (Some(lemma_rw), None, None);
+        return (Some(lemma_rw), None);
       };
     }
     if lhs_vars.is_subset(&rhs_vars) {
@@ -985,18 +991,20 @@ impl<'a> Goal<'a> {
     let has_lemma_rw = lemma_rw.lhs_to_rhs.is_some() || lemma_rw.rhs_to_lhs.is_some();
     if !has_lemma_rw {
       warn!("cannot create a lemma from {} and {}", lhs, rhs);
-      (None, None, None)
+      (None, None)
     } else {
       (
         Some(lemma_rw),
-        Some(ConditionalSearcher {
-          condition: condition.clone(),
-          searcher: lhs,
-        }),
-        Some(ConditionalSearcher {
-          condition: condition,
-          searcher: rhs,
-        }),
+        Some((
+          ConditionalSearcher {
+            condition: condition.clone(),
+            searcher: lhs,
+          },
+          ConditionalSearcher {
+            condition,
+            searcher: rhs,
+          },
+        )),
       )
     }
   }
@@ -1228,7 +1236,7 @@ impl<'a> Goal<'a> {
       let mut rewrites = self.lemmas.clone();
       // In the non-cyclic case, only use the original LHS and RHS
       // and only if no other lemmas have been added yet
-      let (lemma_rw, lhs_ih_searcher, rhs_ih_searcher) = self.make_lemma_rewrite(
+      let (lemma_rw, ih_searchers) = self.make_lemma_rewrite(
         &self.eq.lhs.expr,
         &self.eq.rhs.expr,
         &premises,
@@ -1243,8 +1251,8 @@ impl<'a> Goal<'a> {
         panic!()
       }
 
-      if self.ih.0.is_none() || self.ih.1.is_none() {
-        self.ih = (lhs_ih_searcher, rhs_ih_searcher);
+      if self.ih.is_none() {
+        self.ih = ih_searchers;
       }
 
       let lemma_rw = lemma_rw.unwrap();
@@ -2005,7 +2013,7 @@ impl<'a> Goal<'a> {
     let rhs = self.egraph.find(self.eq.rhs.id);
 
     // Only ripple when an IH exists, i.e., we are at a goal already case-split
-    if let (Some(lhs_ih), Some(rhs_ih)) = self.ih.clone() {
+    if let Some((lhs_ih, rhs_ih)) = self.ih.clone() {
       if CONFIG.verbose {
         // println!("IH: {lhs_ih} == {rhs_ih}");
       }
@@ -4223,14 +4231,7 @@ pub fn explain_goal_failure(goal: &Goal) {
   println!("{} {}", "Could not prove".red(), goal.name);
 }
 
-fn find_proof(
-  eq: &ETermEquation,
-  ih: &(
-    Option<ConditionalSearcher<SoundnessWithType, Pattern<SymbolLang>>>,
-    Option<ConditionalSearcher<SoundnessWithType, Pattern<SymbolLang>>>,
-  ),
-  egraph: &mut Eg,
-) -> Option<ProofLeaf> {
+fn find_proof(eq: &ETermEquation, ih: &Option<IH>, egraph: &mut Eg) -> Option<ProofLeaf> {
   let resolved_lhs_id = egraph.find(eq.lhs.id);
   let resolved_rhs_id = egraph.find(eq.rhs.id);
   // Have we proven LHS == RHS?
@@ -4247,7 +4248,7 @@ fn find_proof(
   }
 
   if CONFIG.ripple_mode {
-    if let (Some(lhs_ih), Some(rhs_ih)) = ih {
+    if let Some((lhs_ih, rhs_ih)) = ih {
       if let Some(lhs_matches) = lhs_ih.search_eclass(egraph, resolved_lhs_id) {
         if let Some(rhs_matches) = rhs_ih.search_eclass(egraph, resolved_rhs_id) {
           for (lhs_subst, rhs_subst) in lhs_matches
