@@ -2015,7 +2015,7 @@ impl<'a> Goal<'a> {
     // Only ripple when an IH exists, i.e., we are at a goal already case-split
     if let Some((lhs_ih, rhs_ih)) = self.ih.clone() {
       if CONFIG.verbose {
-        // println!("IH: {lhs_ih} == {rhs_ih}");
+        println!("IH: {} == {}", lhs_ih.searcher, rhs_ih.searcher);
       }
       let mut new_goals = vec![];
 
@@ -2061,18 +2061,39 @@ impl<'a> Goal<'a> {
             .unwrap();
             new_goal.eq.lhs.expr = smallest_rippled_rhs_expr;
             new_goal.eq.lhs.id = rippled_rhs;
+            // new_goal.ih = Some((rhs_ih.clone(), rhs_ih.clone()));
             if CONFIG.verbose {
               println!("New goal:");
               dump_eclass_exprs(&new_goal.egraph, new_goal.eq.lhs.id);
               println!("=?=");
               dump_eclass_exprs(&new_goal.egraph, new_goal.eq.rhs.id);
             }
-            if !new_goal.try_fertilize(lemmas_state, timer) {
-              if CONFIG.verbose {
-                println!("New goal not proven, queue up as lemma");
-              }
-              new_goals.push(new_goal);
-            }
+            new_goals.push(new_goal);
+            // if CONFIG.verbose {
+            //   println!("Try to syntactically decompose new goal");
+            // }
+            // if let Some(syntactic_decomp_goals) = new_goal.syntactic_decomp(lemmas_state, timer) {
+            //   if CONFIG.verbose {
+            //     println!("Syntactic decomp success, try to fertilize each decomposed goal");
+            //   }
+            //   for mut syntactic_decomp_goal in syntactic_decomp_goals {
+            //     if !syntactic_decomp_goal.try_fertilize(lemmas_state, timer) {
+            //       if CONFIG.verbose {
+            //         println!("Fertilization failed, queue up decomposed goal:");
+            //         dump_eclass_exprs(
+            //           &syntactic_decomp_goal.egraph,
+            //           syntactic_decomp_goal.eq.lhs.id,
+            //         );
+            //         println!("=?=");
+            //         dump_eclass_exprs(
+            //           &syntactic_decomp_goal.egraph,
+            //           syntactic_decomp_goal.eq.rhs.id,
+            //         );
+            //       }
+            //       new_goals.push(syntactic_decomp_goal);
+            //     }
+            //   }
+            // }
           }
         }
       }
@@ -2113,18 +2134,39 @@ impl<'a> Goal<'a> {
             .unwrap();
             new_goal.eq.rhs.expr = smallest_rippled_lhs_expr;
             new_goal.eq.rhs.id = rippled_lhs;
+            // new_goal.ih = Some((lhs_ih.clone(), lhs_ih.clone()));
             if CONFIG.verbose {
               println!("New goal:");
               dump_eclass_exprs(&new_goal.egraph, new_goal.eq.lhs.id);
               println!("=?=");
               dump_eclass_exprs(&new_goal.egraph, new_goal.eq.rhs.id);
             }
-            if !new_goal.try_fertilize(lemmas_state, timer) {
-              if CONFIG.verbose {
-                println!("New goal not proven, queue up as lemma");
-              }
-              new_goals.push(new_goal);
-            }
+            new_goals.push(new_goal);
+            // if CONFIG.verbose {
+            //   println!("Try to syntactically decompose new goal");
+            // }
+            // if let Some(syntactic_decomp_goals) = new_goal.syntactic_decomp(lemmas_state, timer) {
+            //   if CONFIG.verbose {
+            //     println!("Syntactic decomp success, try to fertilize each decomposed goal");
+            //   }
+            //   for mut syntactic_decomp_goal in syntactic_decomp_goals {
+            //     if !syntactic_decomp_goal.try_fertilize(lemmas_state, timer) {
+            //       if CONFIG.verbose {
+            //         println!("Fertilization failed, queue up decomposed goal:");
+            //         dump_eclass_exprs(
+            //           &syntactic_decomp_goal.egraph,
+            //           syntactic_decomp_goal.eq.lhs.id,
+            //         );
+            //         println!("=?=");
+            //         dump_eclass_exprs(
+            //           &syntactic_decomp_goal.egraph,
+            //           syntactic_decomp_goal.eq.rhs.id,
+            //         );
+            //       }
+            //       new_goals.push(syntactic_decomp_goal);
+            //     }
+            //   }
+            // }
           }
         }
       }
@@ -2178,7 +2220,7 @@ impl<'a> Goal<'a> {
     let lhs_eclass = self.egraph[lhs].clone();
     self.egraph.rebuild();
     if false && CONFIG.verbose {
-      // println!("Search for {lhs_ih} in LHS e-class:");
+      println!("Search for {} in LHS e-class:", lhs_ih.searcher);
       dump_eclass_exprs(&self.egraph, lhs);
     }
     if let Some(matches) = lhs_ih.search_eclass(&self.egraph, lhs) {
@@ -2327,7 +2369,7 @@ impl<'a> Goal<'a> {
         continue;
       }
       if CONFIG.verbose {
-        println!("Inferred lemma:");
+        println!("New goal:");
         dump_eclass_exprs(&self.egraph, au_lhs);
         println!("=?=");
         dump_eclass_exprs(&self.egraph, au_rhs);
@@ -2352,7 +2394,7 @@ impl<'a> Goal<'a> {
       new_goal.eq.rhs.id = au_rhs;
       if !new_goal.try_fertilize(lemmas_state, timer) {
         if CONFIG.verbose {
-          println!("New goal not proven, queue up as lemma");
+          println!("Fertilization failed, defer new goal");
         }
         new_goals.push(new_goal);
       }
@@ -2489,7 +2531,7 @@ impl<'a> Goal<'a> {
 
       if !new_goal.try_fertilize(lemmas_state, timer) {
         if CONFIG.verbose {
-          println!("New goal not proven, queue up as lemma");
+          println!("Fertilization failed, defer new goal");
         }
         // We guarantee that the *smaller* inner descendent lemma is attempted before the outer one
         new_goals.push(new_goal);
@@ -3941,7 +3983,6 @@ impl BreadthFirstScheduler for GoalLevelPriorityQueue {
     self.is_found_new_lemma = true;
     let mut frontier = self.goal_graph.get_frontier_goals();
     if CONFIG.verbose {
-      let _goals = self.goal_graph.get_lemma(0).goals.clone();
       println!("\n\n================= current queue ==============");
       for info in frontier.iter() {
         println!("[{}] {}", info.size, info.full_exp);
