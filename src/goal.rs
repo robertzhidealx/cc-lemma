@@ -608,6 +608,7 @@ pub struct Goal<'a> {
   scrutinees: VecDeque<Scrutinee>,
   /// Variables that we have already case split
   pub case_split_vars: BTreeSet<Symbol>,
+  // TODO: Check this out
   /// Instantiations of the induction hypothesis that are in the egraph
   grounding_instantiations: Vec<IdSubst>,
   /// The equation we are trying to prove
@@ -790,14 +791,19 @@ impl<'a> Goal<'a> {
   /// The rewrites will each be named lemma_n.
   fn make_lemma_rewrites_from_all_exprs(
     &self,
-    lhs_id: Id,
-    rhs_id: Id,
+    mut lhs_id: Id,
+    mut rhs_id: Id,
     premises: Vec<ETermEquation>,
     timer: &Timer,
     lemmas_state: &mut LemmasState,
     add_termination_check: bool,
     exclude_wildcards: bool,
+    canonicalize: bool,
   ) -> (BTreeMap<String, Rw>, Vec<LemmaRewrite<CycleggAnalysis>>) {
+    if canonicalize {
+      lhs_id = self.egraph.find(lhs_id);
+      rhs_id = self.egraph.find(rhs_id);
+    }
     let exprs = get_all_expressions_with_loop(&self.egraph, vec![lhs_id, rhs_id]);
     let is_var = |v| self.local_context.contains_key(v);
     let mut rewrites = self.lemmas.clone();
@@ -1218,12 +1224,14 @@ impl<'a> Goal<'a> {
         panic!()
       }
 
-      let is_var = |v| self.local_context.contains_key(v);
-      let lhs_pat = to_pattern(&self.eq.lhs.expr, is_var);
-      let rhs_pat = to_pattern(&self.eq.rhs.expr, is_var);
-      // TODO
-      // assert!(var_set(&rhs_pat).is_subset(&var_set(&lhs_pat)));
-      self.ih = Some((lhs_pat, rhs_pat));
+      if self.ih.is_none() {
+        let is_var = |v| self.local_context.contains_key(v);
+        let lhs_pat = to_pattern(&self.eq.lhs.expr, is_var);
+        let rhs_pat = to_pattern(&self.eq.rhs.expr, is_var);
+        // TODO
+        // assert!(var_set(&rhs_pat).is_subset(&var_set(&lhs_pat)));
+        self.ih = Some((lhs_pat, rhs_pat));
+      }
 
       let lemma_rw = lemma_rw.unwrap();
       lemma_rw.add_to_rewrites(&mut rewrites);
@@ -1255,6 +1263,7 @@ impl<'a> Goal<'a> {
       timer,
       lemmas_state,
       add_termination_check,
+      true,
       true,
     )
   }
@@ -1309,7 +1318,6 @@ impl<'a> Goal<'a> {
       println!("=== split_ite ===");
     }
     let guard_var = "?g".parse().unwrap();
-    // println!("guard var: {guard_var}");
     // Pattern "(ite ?g ?x ?y)"
     let searcher: Pattern<SymbolLang> = format!("({} {} ?x ?y)", *ITE, guard_var).parse().unwrap();
     if CONFIG.verbose {
@@ -1394,7 +1402,7 @@ impl<'a> Goal<'a> {
       );
       if CONFIG.verbose {
         println!("union e-class:");
-        print_expressions_in_eclass(&self.egraph, union_id);
+        dump_eclass_exprs(&self.egraph, union_id);
         println!("union_happened: {union_happened}");
       }
     }
@@ -1489,15 +1497,20 @@ impl<'a> Goal<'a> {
       new_goal.egraph.analysis.local_ctx = new_goal.local_context.clone();
 
       // Create an application of the constructor to the fresh vars
-      let fresh_var_strings_iter = fresh_vars.iter().map(|x| x.to_string());
-      let con_app_string = format!(
-        "({} {})",
-        con,
-        fresh_var_strings_iter
-          .clone()
-          .collect::<Vec<String>>()
-          .join(" ")
-      );
+
+      let con_app_string = if fresh_vars.is_empty() {
+        format!("({})", con)
+      } else {
+        format!(
+          "({} {})",
+          con,
+          fresh_vars
+            .iter()
+            .map(|x| x.to_string())
+            .collect::<Vec<_>>()
+            .join(" ")
+        )
+      };
       if CONFIG.verbose {
         println!("Fill constructor: {con_app_string}");
       }
@@ -1892,6 +1905,7 @@ impl<'a> Goal<'a> {
             lemmas_state,
             false,
             false,
+            true,
           );
           // println!("made rewrites");
           let new_rewrite_eqs: Vec<Prop> = rewrite_infos
@@ -1994,11 +2008,14 @@ impl<'a> Goal<'a> {
           println!("Could not ripple RHS");
         }
       } else {
+        if CONFIG.verbose {
+          println!("Rippled RHS:");
+        }
         for rippled_rhs in rippled_rhs_set {
           if rhs == rippled_rhs {
             continue;
           }
-          if CONFIG.verbose {
+          if false && CONFIG.verbose {
             println!("Rippled RHS:");
             dump_eclass_exprs(&self.egraph, rippled_rhs);
           }
@@ -2007,9 +2024,13 @@ impl<'a> Goal<'a> {
             &self.egraph[rhs].data.cvec_data,
             &self.egraph[rippled_rhs].data.cvec_data,
           ) {
-            let exprs = get_all_expressions(&self.egraph, vec![rippled_rhs]);
-            let smallest_rippled_rhs_expr = get_smallest_expr(&exprs[&rippled_rhs]);
+            let rippled_rhs_exprs = collect_expressions_with_loops(&self.egraph, rippled_rhs);
+            let smallest_rippled_rhs_expr = get_smallest_expr(&rippled_rhs_exprs);
             let mut new_goal = self.clone();
+            new_goal.name = format!(
+              "rippled_rhs_{}={}",
+              smallest_rippled_rhs_expr, new_goal.eq.rhs.expr
+            );
             new_goal.full_expr =
               Equation::from_exprs(&smallest_rippled_rhs_expr, &new_goal.eq.rhs.expr);
             new_goal.eq.lhs.sexp = symbolic_expressions::parser::parse_str(
@@ -2019,7 +2040,7 @@ impl<'a> Goal<'a> {
             new_goal.eq.lhs.expr = smallest_rippled_rhs_expr;
             new_goal.eq.lhs.id = rippled_rhs;
             if CONFIG.verbose {
-              println!("new goal:");
+              println!("New goal:");
               dump_eclass_exprs(&new_goal.egraph, new_goal.eq.lhs.id);
               println!("=?=");
               dump_eclass_exprs(&new_goal.egraph, new_goal.eq.rhs.id);
@@ -2034,11 +2055,14 @@ impl<'a> Goal<'a> {
           println!("Could not ripple LHS");
         }
       } else {
+        if CONFIG.verbose {
+          println!("Rippled LHS:");
+        }
         for rippled_lhs in rippled_lhs_set {
           if lhs == rippled_lhs {
             continue;
           }
-          if CONFIG.verbose {
+          if false && CONFIG.verbose {
             println!("Rippled LHS:");
             dump_eclass_exprs(&self.egraph, rippled_lhs);
           }
@@ -2047,9 +2071,13 @@ impl<'a> Goal<'a> {
             &self.egraph[lhs].data.cvec_data,
             &self.egraph[rippled_lhs].data.cvec_data,
           ) {
-            let exprs = get_all_expressions(&self.egraph, vec![rippled_lhs]);
-            let smallest_rippled_lhs_expr = get_smallest_expr(&exprs[&rippled_lhs]);
+            let rippled_lhs_exprs = collect_expressions_with_loops(&self.egraph, rippled_lhs);
+            let smallest_rippled_lhs_expr = get_smallest_expr(&rippled_lhs_exprs);
             let mut new_goal = self.clone();
+            new_goal.name = format!(
+              "rippled_lhs_{}={}",
+              new_goal.eq.lhs.expr, smallest_rippled_lhs_expr
+            );
             new_goal.full_expr =
               Equation::from_exprs(&new_goal.eq.lhs.expr, &smallest_rippled_lhs_expr);
             new_goal.eq.lhs.sexp = symbolic_expressions::parser::parse_str(
@@ -2059,7 +2087,7 @@ impl<'a> Goal<'a> {
             new_goal.eq.rhs.expr = smallest_rippled_lhs_expr;
             new_goal.eq.rhs.id = rippled_lhs;
             if CONFIG.verbose {
-              println!("new goal:");
+              println!("New goal:");
               dump_eclass_exprs(&new_goal.egraph, new_goal.eq.lhs.id);
               println!("=?=");
               dump_eclass_exprs(&new_goal.egraph, new_goal.eq.rhs.id);
@@ -2098,6 +2126,7 @@ impl<'a> Goal<'a> {
       rhs_ih,
     ));
     rippled_rhs.remove(&self.egraph.find(lhs));
+    // self.egraph.analysis.cvec_analysis.saturate();
 
     (rippled_rhs, ih_replacements)
   }
@@ -2176,9 +2205,22 @@ impl<'a> Goal<'a> {
           }
           new_children = temp;
         }
+        // self.egraph.analysis.cvec_analysis.current_timestamp += 1;
         for id_list in new_children {
           let enode = SymbolLang::new(lhs_enode.op, id_list);
+          // let _type = self
+          //   .global_search_state
+          //   .context
+          //   .get(&enode.op)
+          //   .or_else(|| self.local_context.get(&enode.op))
+          //   .and_then(|t| Some(t.args_ret().1));
           let new_id = self.egraph.add(enode);
+          // if let Some(t) = _type {
+          //   if CONFIG.verbose {
+          //     println!("type: {t}");
+          //   }
+          //   self.add_cvec_for_class(new_id, &t);
+          // }
           if false && CONFIG.verbose {
             println!("New ID:");
             dump_eclass_exprs(&self.egraph, new_id);
@@ -2258,10 +2300,15 @@ impl<'a> Goal<'a> {
         println!("=?=");
         dump_eclass_exprs(&self.egraph, au_rhs);
       }
-      let exprs = get_all_expressions(&self.egraph, vec![au_lhs, au_rhs]);
+      // TODO: Canonicalize?
+      let exprs = get_all_expressions_with_loop(&self.egraph, vec![au_lhs, au_rhs]);
       let smallest_au_lhs_expr = get_smallest_expr(&exprs[&au_lhs]);
       let smallest_au_rhs_expr = get_smallest_expr(&exprs[&au_rhs]);
       let mut new_goal = self.clone();
+      new_goal.name = format!(
+        "syntactic_decomp_{}={}",
+        smallest_au_lhs_expr, smallest_au_rhs_expr
+      );
       new_goal.full_expr = Equation::from_exprs(&smallest_au_lhs_expr, &smallest_au_rhs_expr);
       new_goal.eq.lhs.sexp =
         symbolic_expressions::parser::parse_str(smallest_au_lhs_expr.to_string().as_str()).unwrap();
@@ -2365,11 +2412,15 @@ impl<'a> Goal<'a> {
     for (lhs_desc, rhs_desc) in lemmas {
       // TODO: May have to turn off:
       if timer.timeout() {
+        if CONFIG.verbose {
+          println!("*** semantic_decomp ***");
+        }
         return Some(new_goals);
       }
 
       // get_all_expressions_with_loop fails to extract more often
-      let exprs = get_all_expressions(&self.egraph, vec![lhs_desc, rhs_desc]);
+      // TODO: Canonicalize?
+      let exprs = get_all_expressions_with_loop(&self.egraph, vec![lhs_desc, rhs_desc]);
       // println!(
       //   "exprs: {:#?}",
       //   exprs
@@ -2378,9 +2429,13 @@ impl<'a> Goal<'a> {
       //     .collect::<Vec<_>>()
       // );
 
-      let mut new_goal = self.clone();
       let smallest_lhs_desc_expr = get_smallest_expr(&exprs[&lhs_desc]);
       let smallest_rhs_desc_expr = get_smallest_expr(&exprs[&rhs_desc]);
+      let mut new_goal = self.clone();
+      new_goal.name = format!(
+        "semantic_decomp_{}={}",
+        smallest_lhs_desc_expr, smallest_rhs_desc_expr
+      );
       new_goal.full_expr = Equation::from_exprs(&smallest_lhs_desc_expr, &smallest_rhs_desc_expr);
       new_goal.eq.lhs.sexp =
         symbolic_expressions::parser::parse_str(smallest_lhs_desc_expr.to_string().as_str())
@@ -2420,6 +2475,21 @@ impl<'a> Goal<'a> {
   fn get_descendent_pairs_with_matching_cvecs(&mut self, timer: &Timer) -> Vec<(Id, Id)> {
     let lhs = self.egraph.find(self.eq.lhs.id);
     let rhs = self.egraph.find(self.eq.rhs.id);
+    let mut lemmas = vec![];
+    // Relax the restriction that the outer e-classes are different to generate more lemmas:
+    // if lhs == rhs {
+    //   return lemmas;
+    // }
+    match cvecs_equal(
+      &self.egraph.analysis.cvec_analysis,
+      &self.egraph[lhs].data.cvec_data,
+      &self.egraph[rhs].data.cvec_data,
+    ) {
+      None | Some(false) => {
+        return lemmas;
+      }
+      Some(true) => {}
+    }
     if CONFIG.verbose {
       println!("=== get_descendent_pairs_with_matching_cvecs ===");
     }
@@ -2427,48 +2497,37 @@ impl<'a> Goal<'a> {
     let mut rhs_descendents = BTreeSet::new();
     self.compute_descendents(lhs, &mut lhs_descendents);
     self.compute_descendents(rhs, &mut rhs_descendents);
-    let mut lemmas = vec![];
     for (&lhs_desc, &rhs_desc) in lhs_descendents
       .iter()
       .cartesian_product(rhs_descendents.iter())
     {
       // TODO: May have to turn off:
       if timer.timeout() {
+        if CONFIG.verbose {
+          println!("*** get_descendent_pairs_with_matching_cvecs ***");
+        }
         return lemmas;
       }
-      if lhs_desc != rhs_desc && (lhs_desc != lhs && rhs_desc != rhs) {
+      if (lhs_desc != lhs && rhs_desc != rhs) && lhs_desc != rhs_desc {
         if let Some(true) = cvecs_equal(
           &self.egraph.analysis.cvec_analysis,
           &self.egraph[lhs_desc].data.cvec_data,
           &self.egraph[rhs_desc].data.cvec_data,
         ) {
-          // TODO: Needed?
-          // self.saturate(lemma_rewrites);
-          self.egraph.rebuild();
-          // self.egraph.analysis.cvec_analysis.saturate();
-          if lhs != rhs {
-            if let Some(true) = cvecs_equal(
-              &self.egraph.analysis.cvec_analysis,
-              &self.egraph[lhs].data.cvec_data,
-              &self.egraph[rhs].data.cvec_data,
-            ) {
-              // lhs = lhs_desc_outer lhs_desc
-              // rhs = rhs_desc_outer rhs_desc
-              //   eclass(lhs_desc != rhs_desc)
-              // but cvec(lhs_desc == rhs_desc)
-              //   eclass(lhs_desc_outer != rhs_desc_outer)
-              // but cvec(lhs_desc_outer == rhs_desc_outer)
-              if CONFIG.verbose {
-                println!();
-                println!("Descendent pair:");
-                dump_eclass_exprs(&self.egraph, lhs_desc);
-                println!("=?=");
-                dump_eclass_exprs(&self.egraph, rhs_desc);
-              }
-              // lemmas.push((self.egraph.find(lhs_desc), self.egraph.find(rhs_desc)));
-              lemmas.push((lhs_desc, rhs_desc));
-            }
+          // lhs = lhs_desc_outer lhs_desc
+          // rhs = rhs_desc_outer rhs_desc
+          //   eclass(lhs_desc != rhs_desc)
+          // but cvec(lhs_desc == rhs_desc)
+          //   eclass(lhs_desc_outer != rhs_desc_outer)
+          // but cvec(lhs_desc_outer == rhs_desc_outer)
+          if CONFIG.verbose {
+            println!("Record descendent pair as inferred lemma:");
+            dump_eclass_exprs(&self.egraph, lhs_desc);
+            println!("=?=");
+            dump_eclass_exprs(&self.egraph, rhs_desc);
           }
+          // lemmas.push((self.egraph.find(lhs_desc), self.egraph.find(rhs_desc)));
+          lemmas.push((lhs_desc, rhs_desc));
         }
       }
     }
@@ -2495,8 +2554,8 @@ impl<'a> Goal<'a> {
       .global_search_state
       .context
       .get(&head_symbol.op)
-      .and_then(|_t| Some(_t.args_ret().1))
-      .or_else(|| self.local_context.get(&head_symbol.op).cloned());
+      .or_else(|| self.local_context.get(&head_symbol.op))
+      .and_then(|_t| Some(_t.args_ret().1));
     if let Some(t) = _type {
       if false && CONFIG.verbose {
         println!("Type: {t}");
@@ -2511,6 +2570,7 @@ impl<'a> Goal<'a> {
       // TODO: More fields? (Reference case_split)
       self.local_context.insert(var_name_symbol, t.clone());
       self.var_classes.insert(var_name_symbol, var_id);
+      self.egraph.analysis.cvec_analysis.current_timestamp += 1;
       self.add_cvec_for_class(var_id, &t);
       self.egraph.analysis.cvec_analysis.saturate();
       self.egraph.rebuild();
@@ -2646,18 +2706,21 @@ impl<'a> Goal<'a> {
         ProofLeaf::Refl(_) => {
           panic!("Goals inferred from decompositions should never be proven by reflexivity");
         }
-        ProofLeaf::StrongFertilization() | ProofLeaf::Decomposition() => {
+        ProofLeaf::StrongFertilization()
+        // TODO: This case may no longer be necessary
+        | ProofLeaf::Decomposition() => {
           if CONFIG.verbose {
             println!("Proof by strong fertilization or decomposition");
           }
           let (rewrites, rewrite_infos) = self.make_lemma_rewrites_from_all_exprs(
-            self.egraph.find(self.eq.lhs.id),
-            self.egraph.find(self.eq.rhs.id),
+            self.eq.lhs.id,
+            self.eq.rhs.id,
             vec![],
             timer,
             lemmas_state,
             false,
             false,
+            true,
           );
           // We've proven both the base case and the inductive case at this point,
           // so add lemma as rewrite rules.
@@ -3404,7 +3467,6 @@ impl<'a> LemmaProofState<'a> {
       (blocking_vars, blocking_exprs)
     };
 
-    // println!("searching for generalized lemmas");
     let mut related_lemmas = Vec::new();
     if CONFIG.generalization {
       let lemma_indices = lemmas_state.add_lemmas(
@@ -3413,30 +3475,26 @@ impl<'a> LemmaProofState<'a> {
       );
       related_lemmas.extend(lemma_indices);
     }
-    // println!("searching for cc lemmas");
-    if !CONFIG.ripple_mode && CONFIG.cc_lemmas {
-      let possible_lemmas = goal.search_for_cc_lemmas(timer, lemmas_state);
-      let lemma_indices = lemmas_state.add_lemmas(possible_lemmas, self.proof_depth + 1);
-      related_lemmas.extend(lemma_indices);
-    }
-    // println!("done searching for cc lemmas");
     // This ends up being really slow so we'll just take the lemma duplication for now
     // It's unclear that it lets us prove that much more anyway.
     // state.add_cyclic_lemmas(&goal);
 
     // goal.debug_search_for_patterns_in_egraph();
 
-    goal.egraph.rebuild();
+    // goal.egraph.rebuild();
 
+    let mut ripple_out_success = false;
     if CONFIG.ripple_mode {
       if let Some(new_goals) = goal.ripple_out() {
+        ripple_out_success = true;
         for new_goal in new_goals {
           let (_rewrites, rewrite_infos) = new_goal.make_lemma_rewrites_from_all_exprs(
-            new_goal.egraph.find(new_goal.eq.lhs.id),
-            new_goal.egraph.find(new_goal.eq.rhs.id),
+            new_goal.eq.lhs.id,
+            new_goal.eq.rhs.id,
             vec![],
             timer,
             lemmas_state,
+            false,
             false,
             false,
           );
@@ -3444,82 +3502,104 @@ impl<'a> LemmaProofState<'a> {
             .into_iter()
             .map(|rw_info| rw_info.lemma_prop.clone())
             .collect::<Vec<_>>();
-          let mut possible_lemmas = vec![];
-          let fresh_name = format!("fresh_{}_{}", new_goal.name, new_goal.egraph.total_size());
-          for prop in &new_rewrite_eqs {
-            possible_lemmas.extend(find_generalizations_prop(
-              prop,
-              new_goal.global_search_state.context,
-              fresh_name.clone(),
-            ));
-          }
+          // Turns out it's a net negative to generalize too much. It leads to too many lemmas and sometimes leads to timeouts
+          // let mut possible_lemmas = vec![];
+          // let fresh_name = format!("fresh_{}_{}", new_goal.name, new_goal.egraph.total_size());
+          // for prop in &new_rewrite_eqs {
+          //   possible_lemmas.extend(find_generalizations_prop(
+          //     prop,
+          //     new_goal.global_search_state.context,
+          //     fresh_name.clone(),
+          //   ));
+          // }
           // TODO: Check proof_depth mechanism
-          let lemma_indices = lemmas_state.add_lemmas(possible_lemmas, self.proof_depth + 1);
+          // let lemma_indices = lemmas_state.add_lemmas(possible_lemmas, self.proof_depth + 1);
+          let lemma_indices = lemmas_state.add_lemmas(new_rewrite_eqs, self.proof_depth + 1);
           related_lemmas.extend(lemma_indices);
         }
       }
     }
 
+    let mut syntactic_decomp_success = false;
     if CONFIG.ripple_mode {
       if let Some(new_goals) = goal.syntactic_decomp(lemmas_state, timer) {
+        syntactic_decomp_success = true;
         for new_goal in new_goals {
           let (_rewrites, rewrite_infos) = new_goal.make_lemma_rewrites_from_all_exprs(
-            new_goal.egraph.find(new_goal.eq.lhs.id),
-            new_goal.egraph.find(new_goal.eq.rhs.id),
+            new_goal.eq.lhs.id,
+            new_goal.eq.rhs.id,
             vec![],
             timer,
             lemmas_state,
             false,
             false,
+            true,
           );
           let new_rewrite_eqs = rewrite_infos
             .into_iter()
             .map(|rw_info| rw_info.lemma_prop)
             .collect::<Vec<_>>();
-          let mut possible_lemmas = vec![];
-          let fresh_name = format!("fresh_{}_{}", new_goal.name, new_goal.egraph.total_size());
-          for prop in &new_rewrite_eqs {
-            possible_lemmas.extend(find_generalizations_prop(
-              prop,
-              new_goal.global_search_state.context,
-              fresh_name.clone(),
-            ));
-          }
-          let lemma_indices = lemmas_state.add_lemmas(possible_lemmas, self.proof_depth + 1);
+          // let mut possible_lemmas = vec![];
+          // let fresh_name = format!("fresh_{}_{}", new_goal.name, new_goal.egraph.total_size());
+          // for prop in &new_rewrite_eqs {
+          //   possible_lemmas.extend(find_generalizations_prop(
+          //     prop,
+          //     new_goal.global_search_state.context,
+          //     fresh_name.clone(),
+          //   ));
+          // }
+          // let lemma_indices = lemmas_state.add_lemmas(possible_lemmas, self.proof_depth + 1);
+          let lemma_indices = lemmas_state.add_lemmas(new_rewrite_eqs, self.proof_depth + 1);
           related_lemmas.extend(lemma_indices);
         }
       }
     }
 
+    let mut semantic_decomp_success = false;
     if CONFIG.ripple_mode {
       if let Some(new_goals) = goal.semantic_decomp(lemmas_state, timer) {
+        semantic_decomp_success = true;
         for new_goal in new_goals {
           let (_rewrites, rewrite_infos) = new_goal.make_lemma_rewrites_from_all_exprs(
-            new_goal.egraph.find(new_goal.eq.lhs.id),
-            new_goal.egraph.find(new_goal.eq.rhs.id),
+            new_goal.eq.lhs.id,
+            new_goal.eq.rhs.id,
             new_goal.premises.clone(),
             timer,
             lemmas_state,
-            true,
             false,
+            false,
+            true,
           );
           let new_rewrite_eqs = rewrite_infos
             .into_iter()
             .map(|rw_info| rw_info.lemma_prop)
             .collect::<Vec<_>>();
-          let mut possible_lemmas = vec![];
-          let fresh_name = format!("fresh_{}_{}", new_goal.name, new_goal.egraph.total_size());
-          for prop in &new_rewrite_eqs {
-            possible_lemmas.extend(find_generalizations_prop(
-              prop,
-              new_goal.global_search_state.context,
-              fresh_name.clone(),
-            ));
-          }
-          let lemma_indices = lemmas_state.add_lemmas(possible_lemmas, self.proof_depth + 1);
+          // let mut possible_lemmas = vec![];
+          // let fresh_name = format!("fresh_{}_{}", new_goal.name, new_goal.egraph.total_size());
+          // for prop in &new_rewrite_eqs {
+          //   possible_lemmas.extend(find_generalizations_prop(
+          //     prop,
+          //     new_goal.global_search_state.context,
+          //     fresh_name.clone(),
+          //   ));
+          // }
+          // let lemma_indices = lemmas_state.add_lemmas(possible_lemmas, self.proof_depth + 1);
+          let lemma_indices = lemmas_state.add_lemmas(new_rewrite_eqs, self.proof_depth + 1);
           related_lemmas.extend(lemma_indices);
         }
       }
+    }
+
+    let rippled_no_decomp =
+      ripple_out_success && !syntactic_decomp_success && !semantic_decomp_success;
+    let no_ripple_no_decomp =
+      !ripple_out_success && !syntactic_decomp_success && !semantic_decomp_success;
+    if (!CONFIG.ripple_mode && CONFIG.cc_lemmas)
+      || (CONFIG.ripple_mode && CONFIG.fallback_mode && (no_ripple_no_decomp || rippled_no_decomp))
+    {
+      let possible_lemmas = goal.search_for_cc_lemmas(timer, lemmas_state);
+      let lemma_indices = lemmas_state.add_lemmas(possible_lemmas, self.proof_depth + 1);
+      related_lemmas.extend(lemma_indices);
     }
 
     if let Some(scrutinee) = goal.next_scrutinee(blocking_vars) {
@@ -3680,6 +3760,7 @@ impl<'a> ProofState<'a> {
           }
           // Check that there isn't a valid/invalid lemma that subsumes/is
           // subsumed by this lemma.
+          //* Notably, we benefit from the subsumption check
           if !self.lemmas_state.is_valid_new_prop(&lemma_proof_state.prop)
             && !visited_lemma.contains(&lemma_number)
           {
@@ -4005,7 +4086,7 @@ impl BreadthFirstScheduler for GoalLevelPriorityQueue {
 
   fn on_proven_lemma(&mut self, _lemma: usize, proof_state: &mut ProofState<'_>) {
     if CONFIG.verbose {
-      println!("on_proven_lemma");
+      println!("=== on_proven_lemma ===");
     }
     let mut new_lemma = HashSet::new();
     new_lemma.insert(_lemma);
@@ -4068,6 +4149,9 @@ impl BreadthFirstScheduler for GoalLevelPriorityQueue {
 
           ProofState::handle_lemma_outcome(&mut proof_state.lemmas_state, lemma_state);
           if goal.lemma_id == 0 {
+            if CONFIG.verbose {
+              println!("*** on_proven_lemma ***");
+            }
             return;
           }
         }
@@ -4075,6 +4159,9 @@ impl BreadthFirstScheduler for GoalLevelPriorityQueue {
     }
 
     // self.re_extract_lemmas(proof_state);
+    if CONFIG.verbose {
+      println!("*** on_proven_lemma ***");
+    }
   }
 }
 
@@ -4124,9 +4211,11 @@ fn find_proof(
   let resolved_rhs_id = egraph.find(eq.rhs.id);
   // Have we proven LHS == RHS?
   if resolved_lhs_id == resolved_rhs_id {
+    // TODO: This may no longer be necessary
     if CONFIG.ripple_mode {
       let default_expr = RecExpr::default();
       if eq.lhs.expr == default_expr && eq.rhs.expr == default_expr {
+        panic!("ayo");
         return Some(ProofLeaf::Decomposition());
       }
     }

@@ -2,7 +2,6 @@ use crate::ast::{
   is_constructor, is_var, mangle_name, resolve_sexp, Context, Env, Expr, SSubst, Type,
 };
 use crate::config::CONFIG;
-use bitvec::prelude::*;
 use egg::*;
 use itertools::{repeat_n, Itertools};
 use rand::distributions::uniform::SampleUniform;
@@ -11,7 +10,6 @@ use rand::distributions::Distribution;
 use rand::seq::SliceRandom;
 use rand::{thread_rng, Rng};
 use std::cell::RefCell;
-use std::ops::BitOr;
 use std::{
   collections::{BTreeMap, BTreeSet},
   iter::zip,
@@ -562,17 +560,13 @@ pub struct CycleggAnalysis {
   pub case_split_vars: BTreeSet<Symbol>,
   pub local_ctx: Context,
   pub global_ctx: Context,
-  pub ih_analysis: IHAnalysis,
 }
-
-pub type IHData = BitArr!(for 512);
 
 #[derive(Debug, Clone)]
 pub struct CycleggData {
   pub cvec_data: Cvec,
   pub timestamp: usize,
   pub canonical_form_data: CanonicalForm,
-  pub ih_data: IHData,
 }
 
 impl Analysis<SymbolLang> for CycleggAnalysis {
@@ -586,45 +580,19 @@ impl Analysis<SymbolLang> for CycleggAnalysis {
       &self.cvec_analysis.cvec_egraph,
     ) | merge_max(&mut a.timestamp, b.timestamp)
       | a.canonical_form_data.merge(b.canonical_form_data)
-      | self.ih_analysis.merge(&mut a.ih_data, b.ih_data)
   }
 
   fn make(egraph: &EGraph<SymbolLang, Self>, enode: &SymbolLang) -> Self::Data {
     let (cvec_data, timestamp) = Cvec::make(egraph, enode);
     let canonical_form_data = CanonicalForm::make(enode);
-    let ih_data = IHAnalysis::make(egraph, enode);
     CycleggData {
       cvec_data,
       canonical_form_data,
       timestamp,
-      ih_data,
     }
   }
 
   fn modify(egraph: &mut EGraph<SymbolLang, Self>, id: Id) {
     CanonicalForm::modify(egraph, id);
-  }
-}
-
-#[derive(Debug, Clone, Default)]
-pub struct IHAnalysis {}
-
-impl IHAnalysis {
-  pub fn merge(&mut self, to: &mut IHData, from: IHData) -> DidMerge {
-    let old_to = to.clone();
-    *to = BitArray::bitor(*to, from);
-    let to_changed = old_to != *to;
-    let from_changed = from != *to;
-    DidMerge(to_changed, from_changed)
-  }
-
-  pub fn make(egraph: &EGraph<SymbolLang, CycleggAnalysis>, enode: &SymbolLang) -> IHData {
-    let mut bits: IHData = bitarr![0; 512];
-    bits = enode
-      .children
-      .clone()
-      .into_iter()
-      .fold(bits, |x, y| BitArray::bitor(x, egraph[y].data.ih_data));
-    bits
   }
 }

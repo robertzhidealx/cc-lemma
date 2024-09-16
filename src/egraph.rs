@@ -197,10 +197,7 @@ pub fn get_all_expressions_with_loop<L: Language, A: Analysis<L>>(
 ) -> Denotation<L> {
   let mut memo = BTreeMap::new();
   for root in roots {
-    memo.insert(
-      root,
-      collect_expressions_with_loops(egraph, egraph.find(root)),
-    );
+    memo.insert(root, collect_expressions_with_loops(egraph, root));
   }
   memo
 }
