@@ -6,6 +6,7 @@ use log::warn;
 
 use std::collections::{BTreeMap, VecDeque};
 use std::collections::{BTreeSet, HashMap, HashSet};
+use std::fmt;
 use std::fmt::Display;
 use std::iter::zip;
 use std::str::FromStr;
@@ -74,9 +75,6 @@ impl Soundness {
     for (x, orig, new) in triples {
       match is_subterm(new, orig) {
         StructuralComparison::LT => {
-          has_strictly_smaller = true;
-        }
-        StructuralComparison::LE if !blocking_vars.contains(x) => {
           has_strictly_smaller = true;
         }
         StructuralComparison::Incomparable => {
@@ -2026,9 +2024,9 @@ impl<'a> Goal<'a> {
       self.egraph.analysis.cvec_analysis.saturate();
 
       if rippled_rhs_set.is_empty() {
-        if CONFIG.verbose {
-          println!("Could not ripple RHS");
-        }
+        // if CONFIG.verbose {
+        //   println!("Could not ripple RHS");
+        // }
       } else {
         if CONFIG.verbose {
           println!("Rippled RHS:");
@@ -2037,10 +2035,10 @@ impl<'a> Goal<'a> {
           if rhs == rippled_rhs {
             continue;
           }
-          if false && CONFIG.verbose {
-            println!("Rippled RHS:");
-            dump_eclass_exprs(&self.egraph, rippled_rhs);
-          }
+          // if true || CONFIG.verbose {
+          //   println!("Rippled RHS:");
+          //   dump_eclass_exprs(&self.egraph, rippled_rhs);
+          // }
           if let Some(true) = cvecs_equal(
             &self.egraph.analysis.cvec_analysis,
             &self.egraph[rhs].data.cvec_data,
@@ -2200,6 +2198,11 @@ impl<'a> Goal<'a> {
       rhs_ih,
     ));
     rippled_rhs.remove(&self.egraph.find(lhs));
+    println!("rippled: {}", rippled_rhs.len() > 0);
+    let _ = rippled_rhs
+      .clone()
+      .into_iter()
+      .for_each(|x| println!("{}", self.egraph.id_to_expr(x)));
     // self.egraph.analysis.cvec_analysis.saturate();
 
     (rippled_rhs, ih_replacements)
@@ -2225,9 +2228,19 @@ impl<'a> Goal<'a> {
     }
     if let Some(matches) = lhs_ih.search_eclass(&self.egraph, lhs) {
       for subst in matches.substs {
-        if false && CONFIG.verbose {
-          println!("Found match: {subst:?}");
-        }
+        // if false && CONFIG.verbose {
+        println!("Found match:");
+        lhs_ih.searcher.vars().into_iter().for_each(|var| {
+          if subst.get(var).is_none() {
+            println!("{}: none", var)
+          } else {
+            println!(
+              "{}: {}",
+              var,
+              self.egraph.id_to_expr(*subst.get(var).unwrap())
+            )
+          }
+        });
         let new_id = self.add_instantiation_with_var_if_necessary(&rhs_ih.searcher, subst);
         if false && CONFIG.verbose {
           println!("After adding instantiation:");
@@ -3483,7 +3496,12 @@ impl<'a> LemmaProofState<'a> {
     let goal = self.goals.get_mut(pos).unwrap();
 
     // println!("before saturation");
-    // goal._print_lhs_rhs();
+    goal._print_lhs_rhs();
+    let temp_ih = goal.ih.clone();
+    if let Some(temp_ih) = temp_ih {
+      println!("IH LHS: {}", temp_ih.0.searcher);
+      println!("IH RHS: {}", temp_ih.1.searcher);
+    }
     goal.saturate(&lemmas_state.lemma_rewrites);
     // println!("after saturation");
     // goal._print_lhs_rhs();
@@ -3496,12 +3514,16 @@ impl<'a> LemmaProofState<'a> {
         ProofLeaf::Todo => {
           if goal.premises.is_empty() {
             self.outcome = Some(Outcome::Invalid);
+            println!("todo -> claimed invalid");
             return None;
           }
         }
-        // TODO: Even Contradiction?
+        ProofLeaf::StrongFertilization() => {
+          println!("strong fert");
+        }
         _ => {
           self.process_goal_explanation(proof_leaf, &self.goals[pos].name.clone());
+          println!("other -> claimed {:?}", self.outcome);
           return None;
         }
       }
@@ -3522,6 +3544,7 @@ impl<'a> LemmaProofState<'a> {
 
     if goal.scrutinees.is_empty() {
       self.outcome = Some(Outcome::Invalid);
+      println!("claimed invalid");
       return None;
     }
     let (blocking_vars, blocking_exprs) = if !CONFIG.blocking_vars_analysis {
