@@ -50,5 +50,5 @@
   (let targetNew ((Node ?tv35 ?tv36 ?tv37)) (plus (times (Succ (Succ Zero)) (targetNew ?tv36)) (max (targetNew ?tv36) (Succ Zero))))
   (:: mainNew (-> (Tree) Nat))
   (let mainNew (?tv38) (ite1 (balanced ?tv38) (targetNew ?tv38) Zero))
-  (=== optimize (inp0) (Tree) (main inp0) (mainNew inp0))
+  (=== synduce-constraints-balanced_tree-node_count (inp0) (Tree) (main inp0) (mainNew inp0))
 )

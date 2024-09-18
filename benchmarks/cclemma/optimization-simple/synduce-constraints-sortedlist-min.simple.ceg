@@ -41,5 +41,5 @@
   (let targetNew ((Cons ?tv30 ?tv31)) ?tv30)
   (:: mainNew (-> (List) Nat))
   (let mainNew (?tv32) (ite1 (issorted ?tv32) (targetNew ?tv32) Zero))
-  (=== optimize (inp0) (List) (main inp0) (mainNew inp0))
+  (=== synduce-constraints-sortedlist-min (inp0) (List) (main inp0) (mainNew inp0))
 )

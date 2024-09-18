@@ -79,5 +79,5 @@
   (let targetNew ((Concat ?tv52 ?tv53)) (MakeTuple3 (ite2 (and (lq (fst3 (targetNew ?tv52)) (snd3 (targetNew ?tv52))) (nateq (fst3 (targetNew ?tv52)) Zero)) (snd3 (targetNew ?tv53)) (ite2 (nateq (fst3 (targetNew ?tv52)) Zero) (plus (fst3 (targetNew ?tv52)) (fst3 (targetNew ?tv53))) (fst3 (targetNew ?tv52)))) (max (snd3 (targetNew ?tv52)) (snd3 (targetNew ?tv53)))))
   (:: mainNew (-> (CList) Nat))
   (let mainNew (?tv54) (ite2 (issorted (repr ?tv54)) (fst3 (targetNew ?tv54)) Zero))
-  (=== optimize (inp0) (CList) (main inp0) (mainNew inp0))
+  (=== synduce-constraints-sortedlist-sndmax_empty_base_case (inp0) (CList) (main inp0) (mainNew inp0))
 )

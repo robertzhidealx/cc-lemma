@@ -34,5 +34,5 @@
   (:: mainNew (-> (List) Tuple2))
   (let mainNew ((Nil ?tv23)) (MakeTuple2 Zero Zero))
   (let mainNew ((Cons ?tv24 ?tv25)) (MakeTuple2 (ite1 (lq (plus ?tv24 (snd2 (mainNew ?tv25))) (fst2 (mainNew ?tv25))) (fst2 (mainNew ?tv25)) (plus ?tv24 (snd2 (mainNew ?tv25)))) (plus ?tv24 (snd2 (mainNew ?tv25)))))
-  (=== optimize (inp0) (List) (fst2 (mts inp0)) (fst2 (mainNew inp0)))
+  (=== autolifter-single-pass-mts (inp0) (List) (fst2 (mts inp0)) (fst2 (mainNew inp0)))
 )

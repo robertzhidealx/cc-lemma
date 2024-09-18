@@ -22,5 +22,5 @@
   (:: mainNew (-> (List) Nat))
   (let mainNew ((Nil ?tv21)) Zero)
   (let mainNew ((Cons ?tv22 ?tv23)) (plus ?tv22 (times (mainNew ?tv23) (Succ (Succ (Succ (Succ (Succ (Succ (Succ (Succ (Succ (Succ Zero)))))))))))))
-  (=== optimize (inp0) (List) (atoi inp0) (mainNew inp0))
+  (=== autolifter-single-pass-atoi (inp0) (List) (atoi inp0) (mainNew inp0))
 )

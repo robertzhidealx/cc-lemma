@@ -36,5 +36,5 @@
   (:: mainNew (-> (List) Bool))
   (let mainNew ((Nil ?tv21)) True)
   (let mainNew ((Cons ?tv22 ?tv23)) (and (mainNew ?tv23) (lq ?tv22 (Succ Zero))))
-  (=== optimize (inp0) (List) (main inp0) (mainNew inp0))
+  (=== fusion-shortcut-page1 (inp0) (List) (main inp0) (mainNew inp0))
 )

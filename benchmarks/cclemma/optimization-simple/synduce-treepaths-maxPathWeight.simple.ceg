@@ -39,5 +39,5 @@
   (let mainNew ((Top ?tv23)) Zero)
   (let mainNew ((Left ?tv24 ?tv25 ?tv26)) (plus ?tv24 (max (mainNew ?tv26) (mpath ?tv25))))
   (let mainNew ((Right ?tv27 ?tv28 ?tv29)) (plus ?tv27 (max (mainNew ?tv29) (mpath ?tv28))))
-  (=== optimize (inp0) (Zipper) (main inp0) (mainNew inp0))
+  (=== synduce-treepaths-maxPathWeight (inp0) (Zipper) (main inp0) (mainNew inp0))
 )

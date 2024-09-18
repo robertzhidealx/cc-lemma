@@ -334,6 +334,7 @@ impl GoalGraph {
         frontier_goals.push(current_goal);
       } else {
         waiting_goals.push(current_goal);
+        //* Exhaustively collect all case-split branches
         for child in node.split_children.as_ref().unwrap() {
           queue.push_back(child.clone())
         }

@@ -25,5 +25,5 @@
   (:: mainNew (-> (Tree) Nat))
   (let mainNew ((Leaf ?tv17)) (times ?tv17 ?tv17))
   (let mainNew ((Branch ?tv18 ?tv19)) (plus (mainNew ?tv18) (mainNew ?tv19)))
-  (=== optimize (inp0) (Tree) (main inp0) (mainNew inp0))
+  (=== fusion-deforestation-page7-2 (inp0) (Tree) (main inp0) (mainNew inp0))
 )

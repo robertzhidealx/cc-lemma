@@ -57,5 +57,5 @@
   (let main (?tv40) (ite2 (allpos ?tv40) (snd3 (spec (repr ?tv40))) Zero))
   (:: mainNew (-> (CList) Nat))
   (let mainNew (?tv41) (ite2 (allpos ?tv41) Zero Zero))
-  (=== optimize (inp0) (CList) (main inp0) (mainNew inp0))
+  (=== synduce-constraints-all_positive-sndmin (inp0) (CList) (main inp0) (mainNew inp0))
 )

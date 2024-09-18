@@ -25,5 +25,5 @@
   (:: mainNew (-> (CList) Nat))
   (let mainNew ((Single ?tv25)) ?tv25)
   (let mainNew ((Concat ?tv26 ?tv27)) (mainNew ?tv27))
-  (=== optimize (inp0) (CList) (main inp0) (mainNew inp0))
+  (=== synduce-list-last (inp0) (CList) (main inp0) (mainNew inp0))
 )

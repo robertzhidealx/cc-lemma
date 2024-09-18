@@ -41,5 +41,5 @@
   (:: mainNew (-> (CList) Tuple2))
   (let mainNew ((Single ?tv25)) (MakeTuple2 True ?tv25 ?tv25))
   (let mainNew ((Concat ?tv26 ?tv27)) (MakeTuple2 (or (and (and (not (third2 (mainNew ?tv26))) (fst2 (mainNew ?tv26))) (fst2 (mainNew ?tv27))) (and (and (fst2 (mainNew ?tv26)) (fst2 (mainNew ?tv27))) (snd2 (mainNew ?tv27)))) (snd2 (mainNew ?tv26)) (third2 (mainNew ?tv27))))
-  (=== optimize (inp0) (CList) (main inp0) (fst2 (mainNew inp0)))
+  (=== synduce-list-zeros_ones (inp0) (CList) (main inp0) (fst2 (mainNew inp0)))
 )

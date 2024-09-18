@@ -66,5 +66,5 @@
   (:: mainNew (-> (Tree) Tuple4))
   (let mainNew ((Leaf ?tv28)) (MakeTuple4 (Cons ?tv28 (Nil Null)) Zero))
   (let mainNew ((Node ?tv29 ?tv30)) (ite4 (gq (snd4 (mainNew ?tv29)) (snd4 (mainNew ?tv30))) (MakeTuple4 (fst4 (mainNew ?tv29)) (plus (Succ Zero) (snd4 (mainNew ?tv29)))) (ite4 (nateq (snd4 (mainNew ?tv29)) (snd4 (mainNew ?tv30))) (MakeTuple4 (cat (fst4 (mainNew ?tv30)) (fst4 (mainNew ?tv29))) (plus (snd4 (mainNew ?tv29)) (Succ Zero))) (MakeTuple4 (fst4 (mainNew ?tv30)) (plus (snd4 (mainNew ?tv30)) (Succ Zero))))))
-  (=== optimize (inp0) (Tree) (main inp0) (fst4 (mainNew inp0)))
+  (=== fusion-tupling-page1 (inp0) (Tree) (main inp0) (fst4 (mainNew inp0)))
 )

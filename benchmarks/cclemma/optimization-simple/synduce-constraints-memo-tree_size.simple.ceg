@@ -42,5 +42,5 @@
   (let main (?tv36) (ite2 (ismemo ?tv36) (spec (repr ?tv36))))
   (:: mainNew (-> (TreeMemo) Nat))
   (let mainNew (?tv37) (ite2 (ismemo ?tv37) (memo ?tv37)))
-  (=== optimize (inp0) (TreeMemo) (main inp0) (mainNew inp0))
+  (=== synduce-constraints-memo-tree_size (inp0) (TreeMemo) (main inp0) (mainNew inp0))
 )

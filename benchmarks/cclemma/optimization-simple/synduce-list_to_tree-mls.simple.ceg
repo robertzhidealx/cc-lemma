@@ -47,5 +47,5 @@
   (let targetNew ((Node ?tv35 ?tv36 ?tv37)) (MakeTuple3 (plus (plus (fst3 (targetNew ?tv37)) (fst3 (targetNew ?tv36))) ?tv35) (ite2 (lq (max (plus (snd3 (targetNew ?tv37)) (fst3 (targetNew ?tv36))) (snd3 (targetNew ?tv36))) (plus (fst3 (targetNew ?tv37)) (max (plus (fst3 (targetNew ?tv36)) ?tv35) (fst3 (targetNew ?tv36))))) (plus (fst3 (targetNew ?tv37)) (max (plus (fst3 (targetNew ?tv36)) ?tv35) (fst3 (targetNew ?tv36)))) (max (plus (snd3 (targetNew ?tv37)) (fst3 (targetNew ?tv36))) (snd3 (targetNew ?tv36))))))
   (:: mainNew (-> (Tree) Tuple3))
   (let mainNew (?tv38) (MakeTuple3 (fst3 (targetNew ?tv38)) (snd3 (targetNew ?tv38))))
-  (=== optimize (inp0) (Tree) (main inp0) (mainNew inp0))
+  (=== synduce-list_to_tree-mls (inp0) (Tree) (main inp0) (mainNew inp0))
 )

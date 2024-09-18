@@ -25,5 +25,5 @@
   (:: mainNew (-> (List) Nat))
   (let mainNew ((Nil ?tv23)) Zero)
   (let mainNew ((Cons ?tv24 ?tv25)) (ite1 (not ?tv24) (plus (Succ Zero) (mainNew ?tv25)) Zero))
-  (=== optimize (inp0) (List) (dropwhile Zero inp0) (mainNew inp0))
+  (=== autolifter-single-pass-dropwhile (inp0) (List) (dropwhile Zero inp0) (mainNew inp0))
 )

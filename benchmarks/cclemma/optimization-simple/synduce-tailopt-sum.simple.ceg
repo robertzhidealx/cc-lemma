@@ -27,5 +27,5 @@
   (:: mainNew (-> (Nat List) Nat))
   (let mainNew (?tv28 (Nil ?tv29)) ?tv28)
   (let mainNew (?tv28 (Cons ?tv30 ?tv31)) (mainNew (plus ?tv28 ?tv30) ?tv31))
-  (=== optimize (inp0) (List) (main inp0) (mainNew Zero inp0))
+  (=== synduce-tailopt-sum (inp0) (List) (main inp0) (mainNew Zero inp0))
 )

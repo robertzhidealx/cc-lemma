@@ -58,5 +58,5 @@
   (let targetNew ((Concat ?tv56 ?tv57)) (targetNew ?tv57))
   (:: mainNew (-> (CList) Nat))
   (let mainNew (?tv58) (ite3 (issorted (repr ?tv58)) (targetNew ?tv58) Zero))
-  (=== optimize (inp0) (CList) (main inp0) (mainNew inp0))
+  (=== synduce-constraints-sortedlist-sndmind (inp0) (CList) (main inp0) (mainNew inp0))
 )

@@ -6,7 +6,6 @@ use log::warn;
 
 use std::collections::{BTreeMap, VecDeque};
 use std::collections::{BTreeSet, HashMap, HashSet};
-use std::fmt;
 use std::fmt::Display;
 use std::iter::zip;
 use std::str::FromStr;
@@ -69,10 +68,10 @@ impl Soundness {
   fn smaller_tuple(
     &self,
     triples: &Vec<(Symbol, Expr, Expr)>,
-    blocking_vars: &BTreeSet<Symbol>,
+    _blocking_vars: &BTreeSet<Symbol>,
   ) -> bool {
     let mut has_strictly_smaller = false;
-    for (x, orig, new) in triples {
+    for (_, orig, new) in triples {
       match is_subterm(new, orig) {
         StructuralComparison::LT => {
           has_strictly_smaller = true;
@@ -220,13 +219,13 @@ impl<'a> SearchCondition<SymbolLang, CycleggAnalysis> for TypeRestriction {
     } else {
       // println!("unknown type of variable {} {:?}", op, egraph.analysis.local_ctx);
     }
-    if CONFIG.verbose && !res {
-      println!(
-        "reject rewrite on {} {}",
-        egraph[eclass].nodes.first().unwrap().op,
-        self.ty
-      );
-    }
+    // if CONFIG.verbose && !res {
+    //   println!(
+    //     "reject rewrite on {} {}",
+    //     egraph[eclass].nodes.first().unwrap().op,
+    //     self.ty
+    //   );
+    // }
     res
   }
 }
@@ -742,16 +741,15 @@ impl<'a> Goal<'a> {
 
   /// Saturate the goal by applying all available rewrites
   pub fn saturate(&mut self, top_lemmas: &BTreeMap<String, Rw>) {
-    let mut rewrites: Vec<_> = self
+    let mut rewrites = self
       .global_search_state
       .reductions
       .iter()
       .chain(top_lemmas.values())
-      .collect();
+      .collect::<Vec<_>>();
     if !CONFIG.ripple_mode {
       rewrites.extend(self.lemmas.values());
     }
-    // println!("rewrites: {:#?}", rewrites);
     let lhs_id = self.eq.lhs.id;
     let rhs_id = self.eq.rhs.id;
     let runner = Runner::default()
@@ -771,8 +769,126 @@ impl<'a> Goal<'a> {
 
   /// Look to see if we have proven the goal somehow. Note that this does not
   /// perform the actual proof search, it simply checks if the proof exists.
-  pub fn find_proof(&mut self) -> Option<ProofLeaf> {
-    find_proof(&self.eq, &self.ih, &mut self.egraph)
+  pub fn find_proof(
+    &mut self,
+    lemmas_state: &mut LemmasState,
+    can_install_ih: bool,
+  ) -> Option<ProofLeaf> {
+    let resolved_lhs_id = self.egraph.find(self.eq.lhs.id);
+    let resolved_rhs_id = self.egraph.find(self.eq.rhs.id);
+    if CONFIG.verbose {
+      println!("Find proof of goal:");
+      dump_eclass_exprs(&self.egraph, resolved_lhs_id);
+      println!("=?=");
+      dump_eclass_exprs(&self.egraph, resolved_rhs_id);
+    }
+
+    // Have we proven LHS == RHS?
+    if resolved_lhs_id == resolved_rhs_id {
+      if self.egraph.lookup_expr(&self.eq.lhs.expr).is_none()
+        || self.egraph.lookup_expr(&self.eq.rhs.expr).is_none()
+      {
+        panic!(
+          "One of {} or {} was removed from the e-graph! We can't emit a proof",
+          self.eq.lhs.expr, self.eq.rhs.expr
+        );
+      }
+      return Some(ProofLeaf::Refl(
+        self
+          .egraph
+          .explain_equivalence(&self.eq.lhs.expr, &self.eq.rhs.expr),
+      ));
+    }
+
+    if CONFIG.ripple_mode {
+      if let Some((lhs_ih, rhs_ih)) = &self.ih {
+        if let Some(lhs_matches) = lhs_ih.search_eclass(&self.egraph, resolved_lhs_id) {
+          if let Some(rhs_matches) = rhs_ih.search_eclass(&self.egraph, resolved_rhs_id) {
+            for (lhs_subst, rhs_subst) in lhs_matches
+              .substs
+              .iter()
+              .cartesian_product(&rhs_matches.substs)
+            {
+              let common_vars_consistent = var_set(&rhs_ih.searcher)
+                .intersection(&var_set(&lhs_ih.searcher))
+                .into_iter()
+                .all(|&var| lhs_subst.get(var) == rhs_subst.get(var));
+              if common_vars_consistent {
+                if CONFIG.verbose {
+                  println!("Proof by strong fertilization");
+                }
+                if can_install_ih {
+                  if CONFIG.verbose {
+                    println!("Installing IH");
+                  }
+                  lemmas_state.lemma_rewrites.extend(self.lemmas.clone());
+                  self.saturate(&lemmas_state.lemma_rewrites);
+                } else {
+                  if CONFIG.verbose {
+                    println!("Branch(es) remaining, cannot install IH");
+                  }
+                  self.saturate(&self.lemmas.clone());
+                }
+                // TODO: What do lemma rewrites apply to?
+                return Some(ProofLeaf::StrongFertilization(
+                  self
+                    .egraph
+                    .explain_equivalence(&self.eq.lhs.expr, &self.eq.rhs.expr),
+                ));
+              }
+            }
+          }
+        }
+      }
+    }
+
+    // Check if this case in unreachable (i.e. if there are any inconsistent
+    // e-classes in the e-graph)
+
+    // TODO: Right now we only look for contradictions using the canonical
+    // form analysis. We currently don't generate contradictions from the
+    // cvec analysis, but we should be able to. However, even if we find
+    // a cvec contradiction, it isn't as easy to use in our proof.
+    //
+    // If we find a contradiction from the cvecs, we need to first find which
+    // enodes the cvecs came from, then we need to explain why those nodes are
+    // equal, then we need to provide the concrete values that cause them to
+    // be unequal. This will probably require us to update the Cvec analysis
+    // to track enodes, which is a little unfortunate.
+    let inconsistent_exprs = self.egraph.classes().find_map(|eclass| {
+      if let CanonicalForm::Inconsistent(n1, n2) = &eclass.data.canonical_form_data {
+        // println!("Proof by contradiction {} != {}", n1, n2);
+
+        // FIXME: these nodes might have been removed, we'll need to be
+        // careful about how we generate this proof. Perhaps we can generate
+        // the proof when we discover the contradiction, since we hopefully
+        // will not have finished removing the e-node at this point.
+        if self.egraph.lookup(n1.clone()).is_none() || self.egraph.lookup(n2.clone()).is_none() {
+          println!(
+            "One of {} or {} was removed from the e-graph! We can't emit a proof",
+            n1, n2
+          );
+          None
+        } else {
+          // This is here only for the purpose of proof generation:
+          let extractor = Extractor::new(&self.egraph, AstSize);
+          let expr1 = extract_with_node(n1, &extractor);
+          let expr2 = extract_with_node(n2, &extractor);
+          if CONFIG.verbose {
+            println!("{}: {} = {}", "UNREACHABLE".bright_red(), expr1, expr2);
+          }
+          Some((expr1, expr2))
+        }
+      } else {
+        None
+      }
+    });
+    if let Some((expr1, expr2)) = inconsistent_exprs {
+      let explanation = self.egraph.explain_equivalence(&expr1, &expr2);
+      Some(ProofLeaf::Contradiction(explanation))
+    } else {
+      None
+    }
   }
 
   /// Check whether an expression is reducible using this goal's reductions
@@ -815,7 +931,7 @@ impl<'a> Goal<'a> {
       lhs_id = self.egraph.find(lhs_id);
       rhs_id = self.egraph.find(rhs_id);
     }
-    let exprs = get_all_expressions_with_loop(&self.egraph, vec![lhs_id, rhs_id]);
+    let exprs = get_all_expressions(&self.egraph, vec![lhs_id, rhs_id]);
     let is_var = |v| self.local_context.contains_key(v);
     let mut rewrites = self.lemmas.clone();
     let mut lemma_rws = vec![];
@@ -1250,7 +1366,16 @@ impl<'a> Goal<'a> {
       }
 
       if self.ih.is_none() {
-        self.ih = ih_searchers;
+        if let Some((lhs_ih, rhs_ih)) = &ih_searchers {
+          if CONFIG.verbose {
+            println!(
+              "No IH found, create one: {} == {}",
+              lhs_ih.searcher, rhs_ih.searcher,
+            );
+          }
+          // assert!(var_set(&rhs_ih.searcher).is_subset(&var_set(&lhs_ih.searcher)));
+          self.ih = ih_searchers;
+        }
       }
 
       let lemma_rw = lemma_rw.unwrap();
@@ -1441,7 +1566,6 @@ impl<'a> Goal<'a> {
     ih_lemma_number: usize,
   ) -> (ProofTerm, Vec<Goal<'a>>) {
     let new_lemmas = self.add_lemma_rewrites(timer, lemmas_state, ih_lemma_number);
-    // println!("# lemmas: {}", self.lemmas.len());
 
     let var_str = scrutinee.name.to_string();
     warn!("case-split on {}", scrutinee.name);
@@ -1491,7 +1615,7 @@ impl<'a> Goal<'a> {
       // We will update the timestamp of the cvec analysis so that we enforce
       // the update when we generate a cvec.
       new_goal.egraph.analysis.cvec_analysis.current_timestamp += 1;
-      let _pre_expr = self.full_expr.clone();
+      // let _pre_expr = self.full_expr.clone();
 
       for (i, arg_type) in con_args.iter().enumerate() {
         let fresh_var_name = format!("{}_{}{}", scrutinee.name, self.egraph.total_size(), i);
@@ -1555,6 +1679,13 @@ impl<'a> Goal<'a> {
       remove_node(&mut new_goal.egraph, &var_node);
 
       new_goal.egraph.rebuild();
+
+      if CONFIG.verbose {
+        println!("Case-split subgoal:");
+        dump_eclass_exprs(&new_goal.egraph, new_goal.eq.lhs.id);
+        println!("=?=");
+        dump_eclass_exprs(&new_goal.egraph, new_goal.eq.rhs.id);
+      }
 
       // In cyclic mode: add the guard to premises,
       if CONFIG.is_cyclic()
@@ -2000,15 +2131,17 @@ impl<'a> Goal<'a> {
   //   }
   // }
 
-  fn ripple_out(&mut self, lemmas_state: &mut LemmasState, timer: &Timer) -> Option<Vec<Goal<'a>>> {
+  fn ripple_out(&mut self) -> Option<Vec<Goal<'a>>> {
+    let lhs = self.egraph.find(self.eq.lhs.id);
+    let rhs = self.egraph.find(self.eq.rhs.id);
     if CONFIG.verbose {
       println!("=== ripple_out ===");
       println!("Full expr: {}", self.full_expr);
-      self._print_lhs_rhs();
+      println!("Goal:");
+      dump_eclass_exprs(&self.egraph, lhs);
+      println!("=?=");
+      dump_eclass_exprs(&self.egraph, rhs);
     }
-
-    let lhs = self.egraph.find(self.eq.lhs.id);
-    let rhs = self.egraph.find(self.eq.rhs.id);
 
     // Only ripple when an IH exists, i.e., we are at a goal already case-split
     if let Some((lhs_ih, rhs_ih)) = self.ih.clone() {
@@ -2024,26 +2157,26 @@ impl<'a> Goal<'a> {
       self.egraph.analysis.cvec_analysis.saturate();
 
       if rippled_rhs_set.is_empty() {
-        // if CONFIG.verbose {
-        //   println!("Could not ripple RHS");
-        // }
-      } else {
         if CONFIG.verbose {
-          println!("Rippled RHS:");
+          println!("Could not ripple RHS");
         }
+      } else {
         for rippled_rhs in rippled_rhs_set {
           if rhs == rippled_rhs {
+            if CONFIG.verbose {
+              println!("Skipping rippled RHS == RHS");
+            }
             continue;
           }
-          // if true || CONFIG.verbose {
-          //   println!("Rippled RHS:");
-          //   dump_eclass_exprs(&self.egraph, rippled_rhs);
-          // }
           if let Some(true) = cvecs_equal(
             &self.egraph.analysis.cvec_analysis,
             &self.egraph[rhs].data.cvec_data,
             &self.egraph[rippled_rhs].data.cvec_data,
           ) {
+            if CONFIG.verbose {
+              println!("Rippled RHS:");
+              dump_eclass_exprs(&self.egraph, rippled_rhs);
+            }
             let rippled_rhs_exprs = collect_expressions_with_loops(&self.egraph, rippled_rhs);
             let smallest_rippled_rhs_expr = get_smallest_expr(&rippled_rhs_exprs);
             let mut new_goal = self.clone();
@@ -2053,10 +2186,10 @@ impl<'a> Goal<'a> {
             );
             new_goal.full_expr =
               Equation::from_exprs(&smallest_rippled_rhs_expr, &new_goal.eq.rhs.expr);
-            new_goal.eq.lhs.sexp = symbolic_expressions::parser::parse_str(
-              smallest_rippled_rhs_expr.to_string().as_str(),
-            )
-            .unwrap();
+            // new_goal.eq.lhs.sexp = symbolic_expressions::parser::parse_str(
+            //   smallest_rippled_rhs_expr.to_string().as_str(),
+            // )
+            // .unwrap();
             new_goal.eq.lhs.expr = smallest_rippled_rhs_expr;
             new_goal.eq.lhs.id = rippled_rhs;
             // new_goal.ih = Some((rhs_ih.clone(), rhs_ih.clone()));
@@ -2067,31 +2200,6 @@ impl<'a> Goal<'a> {
               dump_eclass_exprs(&new_goal.egraph, new_goal.eq.rhs.id);
             }
             new_goals.push(new_goal);
-            // if CONFIG.verbose {
-            //   println!("Try to syntactically decompose new goal");
-            // }
-            // if let Some(syntactic_decomp_goals) = new_goal.syntactic_decomp(lemmas_state, timer) {
-            //   if CONFIG.verbose {
-            //     println!("Syntactic decomp success, try to fertilize each decomposed goal");
-            //   }
-            //   for mut syntactic_decomp_goal in syntactic_decomp_goals {
-            //     if !syntactic_decomp_goal.try_fertilize(lemmas_state, timer) {
-            //       if CONFIG.verbose {
-            //         println!("Fertilization failed, queue up decomposed goal:");
-            //         dump_eclass_exprs(
-            //           &syntactic_decomp_goal.egraph,
-            //           syntactic_decomp_goal.eq.lhs.id,
-            //         );
-            //         println!("=?=");
-            //         dump_eclass_exprs(
-            //           &syntactic_decomp_goal.egraph,
-            //           syntactic_decomp_goal.eq.rhs.id,
-            //         );
-            //       }
-            //       new_goals.push(syntactic_decomp_goal);
-            //     }
-            //   }
-            // }
           }
         }
       }
@@ -2101,22 +2209,22 @@ impl<'a> Goal<'a> {
           println!("Could not ripple LHS");
         }
       } else {
-        if CONFIG.verbose {
-          println!("Rippled LHS:");
-        }
         for rippled_lhs in rippled_lhs_set {
           if lhs == rippled_lhs {
+            if CONFIG.verbose {
+              println!("Skipping rippled LHS == LHS");
+            }
             continue;
-          }
-          if false && CONFIG.verbose {
-            println!("Rippled LHS:");
-            dump_eclass_exprs(&self.egraph, rippled_lhs);
           }
           if let Some(true) = cvecs_equal(
             &self.egraph.analysis.cvec_analysis,
             &self.egraph[lhs].data.cvec_data,
             &self.egraph[rippled_lhs].data.cvec_data,
           ) {
+            if CONFIG.verbose {
+              println!("Rippled LHS:");
+              dump_eclass_exprs(&self.egraph, rippled_lhs);
+            }
             let rippled_lhs_exprs = collect_expressions_with_loops(&self.egraph, rippled_lhs);
             let smallest_rippled_lhs_expr = get_smallest_expr(&rippled_lhs_exprs);
             let mut new_goal = self.clone();
@@ -2126,10 +2234,10 @@ impl<'a> Goal<'a> {
             );
             new_goal.full_expr =
               Equation::from_exprs(&new_goal.eq.lhs.expr, &smallest_rippled_lhs_expr);
-            new_goal.eq.lhs.sexp = symbolic_expressions::parser::parse_str(
-              smallest_rippled_lhs_expr.to_string().as_str(),
-            )
-            .unwrap();
+            // new_goal.eq.lhs.sexp = symbolic_expressions::parser::parse_str(
+            //   smallest_rippled_lhs_expr.to_string().as_str(),
+            // )
+            // .unwrap();
             new_goal.eq.rhs.expr = smallest_rippled_lhs_expr;
             new_goal.eq.rhs.id = rippled_lhs;
             // new_goal.ih = Some((lhs_ih.clone(), lhs_ih.clone()));
@@ -2140,31 +2248,6 @@ impl<'a> Goal<'a> {
               dump_eclass_exprs(&new_goal.egraph, new_goal.eq.rhs.id);
             }
             new_goals.push(new_goal);
-            // if CONFIG.verbose {
-            //   println!("Try to syntactically decompose new goal");
-            // }
-            // if let Some(syntactic_decomp_goals) = new_goal.syntactic_decomp(lemmas_state, timer) {
-            //   if CONFIG.verbose {
-            //     println!("Syntactic decomp success, try to fertilize each decomposed goal");
-            //   }
-            //   for mut syntactic_decomp_goal in syntactic_decomp_goals {
-            //     if !syntactic_decomp_goal.try_fertilize(lemmas_state, timer) {
-            //       if CONFIG.verbose {
-            //         println!("Fertilization failed, queue up decomposed goal:");
-            //         dump_eclass_exprs(
-            //           &syntactic_decomp_goal.egraph,
-            //           syntactic_decomp_goal.eq.lhs.id,
-            //         );
-            //         println!("=?=");
-            //         dump_eclass_exprs(
-            //           &syntactic_decomp_goal.egraph,
-            //           syntactic_decomp_goal.eq.rhs.id,
-            //         );
-            //       }
-            //       new_goals.push(syntactic_decomp_goal);
-            //     }
-            //   }
-            // }
           }
         }
       }
@@ -2198,11 +2281,13 @@ impl<'a> Goal<'a> {
       rhs_ih,
     ));
     rippled_rhs.remove(&self.egraph.find(lhs));
-    println!("rippled: {}", rippled_rhs.len() > 0);
-    let _ = rippled_rhs
-      .clone()
-      .into_iter()
-      .for_each(|x| println!("{}", self.egraph.id_to_expr(x)));
+    if CONFIG.verbose {
+      println!("rippled: {}", rippled_rhs.len() > 0);
+      let _ = rippled_rhs
+        .clone()
+        .into_iter()
+        .for_each(|x| println!("{}", self.egraph.id_to_expr(x)));
+    }
     // self.egraph.analysis.cvec_analysis.saturate();
 
     (rippled_rhs, ih_replacements)
@@ -2228,19 +2313,20 @@ impl<'a> Goal<'a> {
     }
     if let Some(matches) = lhs_ih.search_eclass(&self.egraph, lhs) {
       for subst in matches.substs {
-        // if false && CONFIG.verbose {
-        println!("Found match:");
-        lhs_ih.searcher.vars().into_iter().for_each(|var| {
-          if subst.get(var).is_none() {
-            println!("{}: none", var)
-          } else {
-            println!(
-              "{}: {}",
-              var,
-              self.egraph.id_to_expr(*subst.get(var).unwrap())
-            )
-          }
-        });
+        if CONFIG.verbose {
+          println!("Found match:");
+          lhs_ih.searcher.vars().into_iter().for_each(|var| {
+            if subst.get(var).is_none() {
+              println!("{}: none", var)
+            } else {
+              println!(
+                "{}: {}",
+                var,
+                self.egraph.id_to_expr(*subst.get(var).unwrap())
+              )
+            }
+          });
+        }
         let new_id = self.add_instantiation_with_var_if_necessary(&rhs_ih.searcher, subst);
         if false && CONFIG.verbose {
           println!("After adding instantiation:");
@@ -2342,15 +2428,14 @@ impl<'a> Goal<'a> {
   fn syntactic_decomp(
     &mut self,
     lemmas_state: &mut LemmasState,
-    timer: &Timer,
+    can_install_ih: bool,
   ) -> Option<Vec<Goal<'a>>> {
-    if CONFIG.verbose {
-      println!("=== syntactic_decomp ===");
-      println!("Full expr: {}", self.full_expr);
-    }
     let lhs = self.egraph.find(self.eq.lhs.id);
     let rhs = self.egraph.find(self.eq.rhs.id);
     if CONFIG.verbose {
+      println!("=== syntactic_decomp ===");
+      println!("Full expr: {}", self.full_expr);
+      println!("Goal:");
       dump_eclass_exprs(&self.egraph, lhs);
       println!("=?=");
       dump_eclass_exprs(&self.egraph, rhs);
@@ -2358,17 +2443,14 @@ impl<'a> Goal<'a> {
     let mut cache = BTreeMap::new();
     let aus = self
       .au_eclass(&mut cache, (lhs, rhs))
-      .iter()
+      .into_iter()
       .filter(|au| match au {
         AU::Hole(_) => false,
         _ => true,
       })
-      .flat_map(|au| au.extract_holes())
-      .map(|hole| match hole {
-        AU::Node(_, _) => unreachable!(),
-        AU::Hole((lhs, rhs)) => (*lhs, *rhs),
-      })
-      .collect::<Vec<_>>();
+      .fold(BTreeSet::new(), |acc, au| {
+        acc.union(&au.extract_holes()).copied().collect()
+      });
     if aus.is_empty() {
       if CONFIG.verbose {
         println!("Cannot syntactically decompose");
@@ -2379,37 +2461,55 @@ impl<'a> Goal<'a> {
     let mut new_goals = vec![];
     for (au_lhs, au_rhs) in aus {
       if au_lhs == au_rhs {
+        if CONFIG.verbose {
+          println!("Skipping au_lhs == au_rhs");
+        }
         continue;
       }
-      if CONFIG.verbose {
-        println!("New goal:");
-        dump_eclass_exprs(&self.egraph, au_lhs);
-        println!("=?=");
-        dump_eclass_exprs(&self.egraph, au_rhs);
-      }
-      // TODO: Canonicalize?
-      let exprs = get_all_expressions_with_loop(&self.egraph, vec![au_lhs, au_rhs]);
-      let smallest_au_lhs_expr = get_smallest_expr(&exprs[&au_lhs]);
-      let smallest_au_rhs_expr = get_smallest_expr(&exprs[&au_rhs]);
-      let mut new_goal = self.clone();
-      new_goal.name = format!(
-        "syntactic_decomp_{}={}",
-        smallest_au_lhs_expr, smallest_au_rhs_expr
-      );
-      new_goal.full_expr = Equation::from_exprs(&smallest_au_lhs_expr, &smallest_au_rhs_expr);
-      new_goal.eq.lhs.sexp =
-        symbolic_expressions::parser::parse_str(smallest_au_lhs_expr.to_string().as_str()).unwrap();
-      new_goal.eq.rhs.sexp =
-        symbolic_expressions::parser::parse_str(smallest_au_rhs_expr.to_string().as_str()).unwrap();
-      new_goal.eq.lhs.expr = smallest_au_lhs_expr;
-      new_goal.eq.rhs.expr = smallest_au_rhs_expr;
-      new_goal.eq.lhs.id = au_lhs;
-      new_goal.eq.rhs.id = au_rhs;
-      if !new_goal.try_fertilize(lemmas_state, timer) {
+      if let Some(true) = cvecs_equal(
+        &self.egraph.analysis.cvec_analysis,
+        &self.egraph[au_lhs].data.cvec_data,
+        &self.egraph[au_rhs].data.cvec_data,
+      ) {
         if CONFIG.verbose {
-          println!("Fertilization failed, defer new goal");
+          println!("New goal:");
+          dump_eclass_exprs(&self.egraph, au_lhs);
+          println!("=?=");
+          dump_eclass_exprs(&self.egraph, au_rhs);
         }
-        new_goals.push(new_goal);
+        // TODO: Canonicalize?
+        let exprs = get_all_expressions_with_loop(
+          &self.egraph,
+          vec![self.egraph.find(au_lhs), self.egraph.find(au_rhs)],
+        );
+        let smallest_au_lhs_expr = get_smallest_expr(&exprs[&au_lhs]);
+        let smallest_au_rhs_expr = get_smallest_expr(&exprs[&au_rhs]);
+        let mut new_goal = self.clone();
+        new_goal.name = format!(
+          "syntactic_decomp_{}={}",
+          smallest_au_lhs_expr, smallest_au_rhs_expr
+        );
+        new_goal.full_expr = Equation::from_exprs(&smallest_au_lhs_expr, &smallest_au_rhs_expr);
+        // new_goal.eq.lhs.sexp =
+        //   symbolic_expressions::parser::parse_str(smallest_au_lhs_expr.to_string().as_str())
+        //     .unwrap();
+        // new_goal.eq.rhs.sexp =
+        //   symbolic_expressions::parser::parse_str(smallest_au_rhs_expr.to_string().as_str())
+        //     .unwrap();
+        new_goal.eq.lhs.expr = smallest_au_lhs_expr;
+        new_goal.eq.rhs.expr = smallest_au_rhs_expr;
+        new_goal.eq.lhs.id = au_lhs;
+        new_goal.eq.rhs.id = au_rhs;
+        if !new_goal.try_fertilize(lemmas_state, can_install_ih) {
+          if CONFIG.verbose {
+            println!("Fertilization failed, defer new goal");
+          }
+          new_goals.push(new_goal);
+        }
+      } else {
+        if CONFIG.verbose {
+          println!("Skipping cvec(au_lhs) != cvec(au_rhs)");
+        }
       }
     }
     if CONFIG.verbose {
@@ -2481,6 +2581,7 @@ impl<'a> Goal<'a> {
     &mut self,
     lemmas_state: &mut LemmasState,
     timer: &Timer,
+    can_install_ih: bool,
   ) -> Option<Vec<Goal<'a>>> {
     if CONFIG.verbose {
       println!("=== semantic_decomp ===");
@@ -2510,7 +2611,10 @@ impl<'a> Goal<'a> {
 
       // get_all_expressions_with_loop fails to extract more often
       // TODO: Canonicalize?
-      let exprs = get_all_expressions_with_loop(&self.egraph, vec![lhs_desc, rhs_desc]);
+      let exprs = get_all_expressions_with_loop(
+        &self.egraph,
+        vec![self.egraph.find(lhs_desc), self.egraph.find(rhs_desc)],
+      );
       // println!(
       //   "exprs: {:#?}",
       //   exprs
@@ -2527,26 +2631,28 @@ impl<'a> Goal<'a> {
         smallest_lhs_desc_expr, smallest_rhs_desc_expr
       );
       new_goal.full_expr = Equation::from_exprs(&smallest_lhs_desc_expr, &smallest_rhs_desc_expr);
-      new_goal.eq.lhs.sexp =
-        symbolic_expressions::parser::parse_str(smallest_lhs_desc_expr.to_string().as_str())
-          .unwrap();
-      new_goal.eq.rhs.sexp =
-        symbolic_expressions::parser::parse_str(smallest_rhs_desc_expr.to_string().as_str())
-          .unwrap();
+      // new_goal.eq.lhs.sexp =
+      //   symbolic_expressions::parser::parse_str(smallest_lhs_desc_expr.to_string().as_str())
+      //     .unwrap();
+      // new_goal.eq.rhs.sexp =
+      //   symbolic_expressions::parser::parse_str(smallest_rhs_desc_expr.to_string().as_str())
+      //     .unwrap();
       new_goal.eq.lhs.expr = smallest_lhs_desc_expr;
       new_goal.eq.rhs.expr = smallest_rhs_desc_expr;
       new_goal.eq.lhs.id = lhs_desc;
       new_goal.eq.rhs.id = rhs_desc;
       // TODO: More fields? (Reference case_split)
       if CONFIG.verbose {
-        println!("New goal: {new_goal}");
+        println!("New goal:");
+        dump_eclass_exprs(&new_goal.egraph, new_goal.eq.lhs.id);
+        println!("=?=");
+        dump_eclass_exprs(&new_goal.egraph, new_goal.eq.rhs.id);
       }
 
-      if !new_goal.try_fertilize(lemmas_state, timer) {
+      if !new_goal.try_fertilize(lemmas_state, can_install_ih) {
         if CONFIG.verbose {
           println!("Fertilization failed, defer new goal");
         }
-        // We guarantee that the *smaller* inner descendent lemma is attempted before the outer one
         new_goals.push(new_goal);
       }
 
@@ -2554,7 +2660,7 @@ impl<'a> Goal<'a> {
       // We have to return both new goals instead of short-circuiting
       // TODO: Benefits from queueing up another copy of the current goal?
       // Likely, because this copy will be smaller than the case-split versions that will get queued up
-      new_goals.push(self.clone());
+      // new_goals.push(self.clone());
     }
     if CONFIG.verbose {
       println!("*** semantic_decomp ***");
@@ -2563,6 +2669,9 @@ impl<'a> Goal<'a> {
   }
 
   fn get_descendent_pairs_with_matching_cvecs(&mut self, timer: &Timer) -> Vec<(Id, Id)> {
+    if CONFIG.verbose {
+      println!("=== get_descendent_pairs_with_matching_cvecs ===");
+    }
     let lhs = self.egraph.find(self.eq.lhs.id);
     let rhs = self.egraph.find(self.eq.rhs.id);
     let mut lemmas = vec![];
@@ -2570,54 +2679,47 @@ impl<'a> Goal<'a> {
     // if lhs == rhs {
     //   return lemmas;
     // }
-    match cvecs_equal(
+    if let Some(true) = cvecs_equal(
       &self.egraph.analysis.cvec_analysis,
       &self.egraph[lhs].data.cvec_data,
       &self.egraph[rhs].data.cvec_data,
     ) {
-      None | Some(false) => {
-        return lemmas;
-      }
-      Some(true) => {}
-    }
-    if CONFIG.verbose {
-      println!("=== get_descendent_pairs_with_matching_cvecs ===");
-    }
-    let mut lhs_descendents = BTreeSet::new();
-    let mut rhs_descendents = BTreeSet::new();
-    self.compute_descendents(lhs, &mut lhs_descendents);
-    self.compute_descendents(rhs, &mut rhs_descendents);
-    for (&lhs_desc, &rhs_desc) in lhs_descendents
-      .iter()
-      .cartesian_product(rhs_descendents.iter())
-    {
-      // TODO: May have to turn off:
-      if timer.timeout() {
-        if CONFIG.verbose {
-          println!("*** get_descendent_pairs_with_matching_cvecs ***");
-        }
-        return lemmas;
-      }
-      if (lhs_desc != lhs && rhs_desc != rhs) && lhs_desc != rhs_desc {
-        if let Some(true) = cvecs_equal(
-          &self.egraph.analysis.cvec_analysis,
-          &self.egraph[lhs_desc].data.cvec_data,
-          &self.egraph[rhs_desc].data.cvec_data,
-        ) {
-          // lhs = lhs_desc_outer lhs_desc
-          // rhs = rhs_desc_outer rhs_desc
-          //   eclass(lhs_desc != rhs_desc)
-          // but cvec(lhs_desc == rhs_desc)
-          //   eclass(lhs_desc_outer != rhs_desc_outer)
-          // but cvec(lhs_desc_outer == rhs_desc_outer)
+      let mut lhs_descendents = BTreeSet::new();
+      let mut rhs_descendents = BTreeSet::new();
+      self.compute_descendents(lhs, &mut lhs_descendents);
+      self.compute_descendents(rhs, &mut rhs_descendents);
+      for (&lhs_desc, &rhs_desc) in lhs_descendents
+        .iter()
+        .cartesian_product(rhs_descendents.iter())
+      {
+        // TODO: May have to turn off:
+        if timer.timeout() {
           if CONFIG.verbose {
-            println!("Record descendent pair as inferred lemma:");
-            dump_eclass_exprs(&self.egraph, lhs_desc);
-            println!("=?=");
-            dump_eclass_exprs(&self.egraph, rhs_desc);
+            println!("*** get_descendent_pairs_with_matching_cvecs ***");
           }
-          // lemmas.push((self.egraph.find(lhs_desc), self.egraph.find(rhs_desc)));
-          lemmas.push((lhs_desc, rhs_desc));
+          return lemmas;
+        }
+        if (lhs_desc != lhs && rhs_desc != rhs) && lhs_desc != rhs_desc {
+          if let Some(true) = cvecs_equal(
+            &self.egraph.analysis.cvec_analysis,
+            &self.egraph[lhs_desc].data.cvec_data,
+            &self.egraph[rhs_desc].data.cvec_data,
+          ) {
+            // lhs = lhs_desc_outer lhs_desc
+            // rhs = rhs_desc_outer rhs_desc
+            //   eclass(lhs_desc != rhs_desc)
+            // but cvec(lhs_desc == rhs_desc)
+            //   eclass(lhs_desc_outer != rhs_desc_outer)
+            // but cvec(lhs_desc_outer == rhs_desc_outer)
+            if CONFIG.verbose {
+              println!("Record descendent pair as inferred lemma:");
+              dump_eclass_exprs(&self.egraph, lhs_desc);
+              println!("=?=");
+              dump_eclass_exprs(&self.egraph, rhs_desc);
+            }
+            // lemmas.push((self.egraph.find(lhs_desc), self.egraph.find(rhs_desc)));
+            lemmas.push((lhs_desc, rhs_desc));
+          }
         }
       }
     }
@@ -2790,35 +2892,13 @@ impl<'a> Goal<'a> {
     cache.get(&base_id).unwrap().clone()
   }
 
-  fn try_fertilize(&mut self, lemmas_state: &mut LemmasState, timer: &Timer) -> bool {
-    if let Some(proof) = self.find_proof() {
+  fn try_fertilize(&mut self, lemmas_state: &mut LemmasState, can_install_ih: bool) -> bool {
+    if let Some(proof) = self.find_proof(lemmas_state, can_install_ih) {
       match proof {
         ProofLeaf::Refl(_) => {
           panic!("Goals inferred from decompositions should never be proven by reflexivity");
         }
-        ProofLeaf::StrongFertilization() => {
-          if CONFIG.verbose {
-            println!("Proof by strong fertilization");
-          }
-          let (rewrites, rewrite_infos) = self.make_lemma_rewrites_from_all_exprs(
-            self.eq.lhs.id,
-            self.eq.rhs.id,
-            vec![],
-            timer,
-            lemmas_state,
-            false,
-            false,
-            true,
-          );
-          // We've proven both the base case and the inductive case at this point,
-          // so add lemma as rewrite rules.
-          for rewrite_info in rewrite_infos {
-            rewrite_info.add_to_rewrites(&mut lemmas_state.lemma_rewrites);
-          }
-          // This should be unnecessary (the IH rewrites are already in self.lemmas):
-          self.lemmas.extend(rewrites);
-          true
-        }
+        ProofLeaf::StrongFertilization(_) => true,
         _ => false,
       }
     } else {
@@ -3255,7 +3335,8 @@ pub enum ProofLeaf {
   /// Constructive equality shown: LHS = RHS
   Refl(Explanation<SymbolLang>),
   /// Proof by strong fertilization
-  StrongFertilization(),
+  StrongFertilization(Explanation<SymbolLang>),
+  // StrongFertilization(Explanation<SymbolLang>),
   /// Contradiction shown (e.g. True = False)
   Contradiction(Explanation<SymbolLang>),
   /// Unimplemented proof type (will crash on proof emission)
@@ -3266,7 +3347,7 @@ impl ProofLeaf {
   fn _name(&self) -> String {
     match &self {
       Self::Refl(_) => "Refl".to_string(),
-      Self::StrongFertilization() => "Fertilization".to_string(),
+      Self::StrongFertilization(_) => "Fertilization".to_string(),
       Self::Contradiction(_) => "Contradiction".to_string(),
       Self::Todo => "TODO".to_string(),
     }
@@ -3277,7 +3358,7 @@ impl std::fmt::Display for ProofLeaf {
   fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
     match self {
       ProofLeaf::Refl(expl) => write!(f, "{}", expl.get_string()),
-      ProofLeaf::StrongFertilization() => write!(f, "Proof by strong fertilization"),
+      ProofLeaf::StrongFertilization(expl) => write!(f, "{}", expl),
       ProofLeaf::Contradiction(expl) => write!(f, "{}", expl.get_string()),
       ProofLeaf::Todo => write!(f, "TODO: proof"),
     }
@@ -3491,16 +3572,23 @@ impl<'a> LemmaProofState<'a> {
     info: &GoalInfo,
     timer: &Timer,
     lemmas_state: &mut LemmasState,
+    can_install_ih: bool,
   ) -> Option<(Vec<(usize, Prop)>, Vec<GoalInfo>)> {
     let pos = self.get_info_index(info);
     let goal = self.goals.get_mut(pos).unwrap();
 
     // println!("before saturation");
-    goal._print_lhs_rhs();
-    let temp_ih = goal.ih.clone();
-    if let Some(temp_ih) = temp_ih {
-      println!("IH LHS: {}", temp_ih.0.searcher);
-      println!("IH RHS: {}", temp_ih.1.searcher);
+    // goal._print_lhs_rhs();
+    // let temp_ih = goal.ih.clone();
+    // if let Some(temp_ih) = temp_ih {
+    //   println!("IH LHS: {}", temp_ih.0.searcher);
+    //   println!("IH RHS: {}", temp_ih.1.searcher);
+    // goal._print_lhs_rhs();
+    if CONFIG.verbose {
+      println!(
+        "Saturate using lemmas: {:#?}",
+        lemmas_state.lemma_rewrites.keys()
+      );
     }
     goal.saturate(&lemmas_state.lemma_rewrites);
     // println!("after saturation");
@@ -3509,21 +3597,25 @@ impl<'a> LemmaProofState<'a> {
     if CONFIG.save_graphs {
       goal.save_egraph();
     }
-    if let Some(proof_leaf) = goal.find_proof() {
+    if let Some(proof_leaf) = goal.find_proof(lemmas_state, can_install_ih) {
       match proof_leaf {
         ProofLeaf::Todo => {
           if goal.premises.is_empty() {
             self.outcome = Some(Outcome::Invalid);
-            println!("todo -> claimed invalid");
+            if CONFIG.verbose {
+              println!("todo -> claimed invalid");
+            }
             return None;
           }
         }
-        ProofLeaf::StrongFertilization() => {
-          println!("strong fert");
-        }
+        // ProofLeaf::StrongFertilization(_) => {
+        //   println!("strong fert");
+        // }
         _ => {
           self.process_goal_explanation(proof_leaf, &self.goals[pos].name.clone());
-          println!("other -> claimed {:?}", self.outcome);
+          if CONFIG.verbose {
+            println!("other -> claimed {:?}", self.outcome);
+          }
           return None;
         }
       }
@@ -3544,7 +3636,9 @@ impl<'a> LemmaProofState<'a> {
 
     if goal.scrutinees.is_empty() {
       self.outcome = Some(Outcome::Invalid);
-      println!("claimed invalid");
+      if CONFIG.verbose {
+        println!("claimed invalid");
+      }
       return None;
     }
     let (blocking_vars, blocking_exprs) = if !CONFIG.blocking_vars_analysis {
@@ -3579,7 +3673,7 @@ impl<'a> LemmaProofState<'a> {
 
     let mut ripple_out_success = false;
     if CONFIG.ripple_mode {
-      if let Some(new_goals) = goal.ripple_out(lemmas_state, timer) {
+      if let Some(new_goals) = goal.ripple_out() {
         ripple_out_success = true;
         for new_goal in new_goals {
           let (_rewrites, rewrite_infos) = new_goal.make_lemma_rewrites_from_all_exprs(
@@ -3606,7 +3700,6 @@ impl<'a> LemmaProofState<'a> {
           //     fresh_name.clone(),
           //   ));
           // }
-          // TODO: Check proof_depth mechanism
           // let lemma_indices = lemmas_state.add_lemmas(possible_lemmas, self.proof_depth + 1);
           let lemma_indices = lemmas_state.add_lemmas(new_rewrite_eqs, self.proof_depth + 1);
           related_lemmas.extend(lemma_indices);
@@ -3616,7 +3709,7 @@ impl<'a> LemmaProofState<'a> {
 
     let mut syntactic_decomp_success = false;
     if CONFIG.ripple_mode {
-      if let Some(new_goals) = goal.syntactic_decomp(lemmas_state, timer) {
+      if let Some(new_goals) = goal.syntactic_decomp(lemmas_state, can_install_ih) {
         syntactic_decomp_success = true;
         for new_goal in new_goals {
           let (_rewrites, rewrite_infos) = new_goal.make_lemma_rewrites_from_all_exprs(
@@ -3651,7 +3744,7 @@ impl<'a> LemmaProofState<'a> {
 
     let mut semantic_decomp_success = false;
     if CONFIG.ripple_mode {
-      if let Some(new_goals) = goal.semantic_decomp(lemmas_state, timer) {
+      if let Some(new_goals) = goal.semantic_decomp(lemmas_state, timer, can_install_ih) {
         semantic_decomp_success = true;
         for new_goal in new_goals {
           let (_rewrites, rewrite_infos) = new_goal.make_lemma_rewrites_from_all_exprs(
@@ -3709,21 +3802,12 @@ impl<'a> LemmaProofState<'a> {
         goal
           .clone()
           .case_split(scrutinee, timer, lemmas_state, self.ih_lemma_number);
-
-      if CONFIG.verbose {
-        for goal in &goals {
-          println!("Case-split subgoal:");
-          dump_eclass_exprs(&goal.egraph, goal.eq.lhs.id);
-          println!("=?=");
-          dump_eclass_exprs(&goal.egraph, goal.eq.rhs.id);
-        }
-      }
-
       // This goal is now an internal node in the proof tree.
       self.lemma_proof.proof.insert(goal_name, proof_term);
       // Add the new goals to the back of the VecDeque.
       let goal_infos = goals
         .iter()
+        //* Assign the same lemma ID to all branches of the case split
         .map(|new_goal| GoalInfo::new(new_goal, info.lemma_id))
         .collect();
       self.goals.extend(goals);
@@ -3745,7 +3829,8 @@ impl<'a> LemmaProofState<'a> {
     let pos = self.get_info_index(info);
     let goal = self.goals.get_mut(pos).unwrap();
     goal.saturate(&lemmas_state.lemma_rewrites);
-    if let Some(leaf) = goal.find_proof() {
+    // TODO
+    if let Some(leaf) = goal.find_proof(lemmas_state, true) {
       let name = goal.name.clone();
       self.process_goal_explanation(leaf, &name);
       true
@@ -3789,6 +3874,9 @@ impl<'a> ProofState<'a> {
         .proven_lemmas
         .insert(lemma_proof_state.prop.clone());
       if let Some(rw) = lemma_proof_state.rw.as_ref() {
+        if CONFIG.verbose {
+          println!("Adding rewrite rule: {}", rw.lhs_to_rhs.as_ref().unwrap().0);
+        }
         rw.add_to_rewrites(&mut lemmas_state.lemma_rewrites)
       }
       if let Some(rw) = lemma_proof_state.rw_no_analysis.as_ref() {
@@ -3835,50 +3923,49 @@ impl<'a> ProofState<'a> {
       if CONFIG.verbose {
         println!("go over each lemma in batch");
       }
-      for lemma_index in lemma_batch_res.unwrap() {
-        if self.timer.timeout() {
-          if CONFIG.verbose {
-            println!("*** prove_breadth_first ***");
-          }
-          return Outcome::Timeout;
+      let (lemma_index, can_install_ih) = lemma_batch_res.unwrap();
+      if self.timer.timeout() {
+        if CONFIG.verbose {
+          println!("*** prove_breadth_first ***");
         }
-        let lemma_number = scheduler.get_lemma_number(&lemma_index);
+        return Outcome::Timeout;
+      }
+      let lemma_number = scheduler.get_lemma_number(&lemma_index);
 
-        if let Some(lemma_proof_state) = self.lemma_proofs.get(&lemma_number) {
-          //println!("info {} {:?}", lemma_proof_state.prop, lemma_proof_state.outcome);
-          // This lemma has been declared valid/invalid
-          if lemma_proof_state.outcome.is_some()
-            && lemma_proof_state.outcome != Some(Outcome::Unknown)
-          {
-            panic!();
-          }
-          // Check that there isn't a valid/invalid lemma that subsumes/is
-          // subsumed by this lemma.
-          //* Notably, we benefit from the subsumption check
-          if !self.lemmas_state.is_valid_new_prop(&lemma_proof_state.prop)
-            && !visited_lemma.contains(&lemma_number)
-          {
-            panic!();
-          }
-        }
-        visited_lemma.insert(lemma_number);
-        scheduler.handle_lemma(lemma_index, self);
-        // Clean up after the scheduler handles the lemma.
-        let lemma_proof_state = self.lemma_proofs.get_mut(&lemma_number).unwrap();
-        ProofState::handle_lemma_outcome(&mut self.lemmas_state, lemma_proof_state);
-        // Check for a definite result if this is the top level lemma.
-        if lemma_number == top_level_lemma_number
-          && lemma_proof_state.outcome.is_some()
+      if let Some(lemma_proof_state) = self.lemma_proofs.get(&lemma_number) {
+        //println!("info {} {:?}", lemma_proof_state.prop, lemma_proof_state.outcome);
+        // This lemma has been declared valid/invalid
+        if lemma_proof_state.outcome.is_some()
           && lemma_proof_state.outcome != Some(Outcome::Unknown)
         {
-          if CONFIG.verbose {
-            println!("*** prove_breadth_first ***");
-          }
-          return lemma_proof_state.outcome.as_ref().unwrap().clone();
+          panic!();
         }
-        if lemma_proof_state.outcome == Some(Outcome::Valid) {
-          scheduler.on_proven_lemma(lemma_number, self);
+        // Check that there isn't a valid/invalid lemma that subsumes/is
+        // subsumed by this lemma.
+        //* Notably, we benefit from the subsumption check
+        if !self.lemmas_state.is_valid_new_prop(&lemma_proof_state.prop)
+          && !visited_lemma.contains(&lemma_number)
+        {
+          panic!();
         }
+      }
+      visited_lemma.insert(lemma_number);
+      scheduler.handle_lemma(lemma_index, self, can_install_ih);
+      // Clean up after the scheduler handles the lemma.
+      let lemma_proof_state = self.lemma_proofs.get_mut(&lemma_number).unwrap();
+      ProofState::handle_lemma_outcome(&mut self.lemmas_state, lemma_proof_state);
+      // Check for a definite result if this is the top level lemma.
+      if lemma_number == top_level_lemma_number
+        && lemma_proof_state.outcome.is_some()
+        && lemma_proof_state.outcome != Some(Outcome::Unknown)
+      {
+        if CONFIG.verbose {
+          println!("*** prove_breadth_first ***");
+        }
+        return lemma_proof_state.outcome.as_ref().unwrap().clone();
+      }
+      if lemma_proof_state.outcome == Some(Outcome::Valid) {
+        scheduler.on_proven_lemma(lemma_number, self);
       }
     }
   }
@@ -3894,7 +3981,7 @@ trait BreadthFirstScheduler {
     &mut self,
     top_level_lemma_number: usize,
     proof_state: &mut ProofState<'_>,
-  ) -> Result<Vec<Self::LemmaIndex>, Outcome>;
+  ) -> Result<(Self::LemmaIndex, bool), Outcome>;
 
   fn get_lemma_number(&self, lemma_index: &Self::LemmaIndex) -> usize;
 
@@ -3903,7 +3990,12 @@ trait BreadthFirstScheduler {
   /// There is boilerplate that is taken care of before (checking the timer,
   /// skipping invalid or proven lemmas) and after (updating the lemma state
   /// based on the outcome).
-  fn handle_lemma(&mut self, lemma_index: Self::LemmaIndex, proof_state: &mut ProofState<'_>);
+  fn handle_lemma(
+    &mut self,
+    lemma_index: Self::LemmaIndex,
+    proof_state: &mut ProofState<'_>,
+    can_install_ih: bool,
+  );
 
   /// A hook that is called whenever a lemma is proven. Theoretically you could
   /// have this logic be in handle_lemma instead.
@@ -3995,7 +4087,7 @@ impl BreadthFirstScheduler for GoalLevelPriorityQueue {
     &mut self,
     _top_level_lemma_number: usize,
     proof_state: &mut ProofState<'_>,
-  ) -> Result<Vec<Self::LemmaIndex>, Outcome> {
+  ) -> Result<(Self::LemmaIndex, bool), Outcome> {
     if CONFIG.verbose {
       println!("=== next_lemma_batch ===");
     }
@@ -4011,26 +4103,34 @@ impl BreadthFirstScheduler for GoalLevelPriorityQueue {
         println!("[{}] {}", info.size, info.full_exp);
         println!("  ({}) {}", info.lemma_id, self.prop_map[&info.lemma_id]);
       }
+      println!("Progress set: {:?}", self.progress_set);
       println!("\n");
     }
     if frontier
       .iter()
       .any(|info| self.progress_set.contains(&info.lemma_id))
     {
+      //* To be sound, if we were to prove any case split branch, we should prove all the others as well
       frontier.retain(|info| self.progress_set.contains(&info.lemma_id));
     }
-    if let Some(optimal) = frontier.into_iter().min_by_key(|info| info.size) {
+    if let Some(optimal) = frontier.iter().min_by_key(|info| info.size) {
       if CONFIG.verbose {
         println!("select min-size goal: {optimal:#?}");
       }
       self.next_goal = Some(optimal.clone());
-      if self.progress_set.contains(&optimal.lemma_id) {
-        self.progress_set.remove(&optimal.lemma_id);
-      }
+      self.progress_set.remove(&optimal.lemma_id);
       if CONFIG.verbose {
         println!("*** next_lemma_batch ***");
+        println!(
+          "Frontier map: {:?}",
+          frontier.iter().counts_by(|info| info.lemma_id)
+        );
       }
-      Ok(vec![optimal.lemma_id])
+      Ok((
+        optimal.lemma_id,
+        // Whether we can start rewriting with the IH after proving this goal
+        !(frontier.iter().counts_by(|info| info.lemma_id)[&optimal.lemma_id] > 1),
+      ))
     } else {
       if CONFIG.verbose {
         println!("report unknown because of an empty queue");
@@ -4044,7 +4144,12 @@ impl BreadthFirstScheduler for GoalLevelPriorityQueue {
     *lemma_index
   }
 
-  fn handle_lemma(&mut self, lemma_index: Self::LemmaIndex, proof_state: &mut ProofState<'_>) {
+  fn handle_lemma(
+    &mut self,
+    lemma_index: Self::LemmaIndex,
+    proof_state: &mut ProofState<'_>,
+    can_install_ih: bool,
+  ) {
     if CONFIG.verbose {
       println!("=== handle_lemma ===");
     }
@@ -4083,8 +4188,12 @@ impl BreadthFirstScheduler for GoalLevelPriorityQueue {
     let lemma_proof_state = proof_state.lemma_proofs.get_mut(&lemma_index).unwrap();
     // println!("\ntry goal {} from {} {}", info.full_exp, self.prop_map[&info.lemma_id], lemma_proof_state.case_split_depth);
 
-    let step_res =
-      lemma_proof_state.try_goal(&info, &proof_state.timer, &mut proof_state.lemmas_state);
+    let step_res = lemma_proof_state.try_goal(
+      &info,
+      &proof_state.timer,
+      &mut proof_state.lemmas_state,
+      can_install_ih,
+    );
 
     if let Some((raw_related_lemmas, related_goals)) = step_res {
       let mut related_lemmas = raw_related_lemmas;
@@ -4106,11 +4215,11 @@ impl BreadthFirstScheduler for GoalLevelPriorityQueue {
           related_lemmas.len(),
           related_goals.len()
         );
-        for lemma in related_lemmas.iter() {
+        for (_, lemma) in related_lemmas.iter() {
           println!(
             "  [{}] {}",
-            sexp_size(&lemma.1.eq.lhs) + sexp_size(&lemma.1.eq.rhs),
-            lemma.1
+            sexp_size(&lemma.eq.lhs) + sexp_size(&lemma.eq.rhs),
+            lemma
           );
         }
       }
@@ -4293,114 +4402,6 @@ impl std::fmt::Display for Outcome {
 
 pub fn explain_goal_failure(goal: &Goal) {
   println!("{} {}", "Could not prove".red(), goal.name);
-}
-
-fn find_proof(eq: &ETermEquation, ih: &Option<IH>, egraph: &mut Eg) -> Option<ProofLeaf> {
-  let resolved_lhs_id = egraph.find(eq.lhs.id);
-  let resolved_rhs_id = egraph.find(eq.rhs.id);
-  // Have we proven LHS == RHS?
-  if resolved_lhs_id == resolved_rhs_id {
-    if egraph.lookup_expr(&eq.lhs.expr).is_none() || egraph.lookup_expr(&eq.rhs.expr).is_none() {
-      panic!(
-        "One of {} or {} was removed from the e-graph! We can't emit a proof",
-        eq.lhs.expr, eq.rhs.expr
-      );
-    }
-    return Some(ProofLeaf::Refl(
-      egraph.explain_equivalence(&eq.lhs.expr, &eq.rhs.expr),
-    ));
-  }
-
-  if CONFIG.ripple_mode {
-    if let Some((lhs_ih, rhs_ih)) = ih {
-      if let Some(lhs_matches) = lhs_ih.search_eclass(egraph, resolved_lhs_id) {
-        if let Some(rhs_matches) = rhs_ih.search_eclass(egraph, resolved_rhs_id) {
-          for (lhs_subst, rhs_subst) in lhs_matches
-            .substs
-            .iter()
-            .cartesian_product(&rhs_matches.substs)
-          {
-            // let lhs_ih_vars = var_set(lhs_ih);
-            // let rhs_ih_vars = var_set(rhs_ih);
-            if CONFIG.verbose
-            // && lhs_ih_vars.is_subset(&rhs_ih_vars)
-            // && lhs_ih_vars.len() != rhs_ih_vars.len()
-            {
-              // println!("LHS IH: {lhs_ih}");
-              // println!("RHS IH: {rhs_ih}");
-              println!("LHS subst: {:?}", lhs_subst);
-              println!("RHS subst: {:?}", rhs_subst);
-              // println!("LHS:");
-              // dump_eclass_exprs(egraph, resolved_lhs_id);
-              // println!("RHS:");
-              // dump_eclass_exprs(egraph, resolved_rhs_id);
-            }
-            // assert!(&var_set(rhs_ih).is_subset(&var_set(lhs_ih)));
-
-            let common_vars_consistent = var_set(&rhs_ih.searcher)
-              .union(&var_set(&lhs_ih.searcher))
-              .collect::<Vec<_>>()
-              .into_iter()
-              .all(|&var| lhs_subst.get(var) == rhs_subst.get(var));
-            // let common_vars_consistent = var_set(rhs_ih)
-            //   .into_iter()
-            //   .all(|var| lhs_subst.get(var) == rhs_subst.get(var));
-            if common_vars_consistent {
-              return Some(ProofLeaf::StrongFertilization());
-            }
-          }
-        }
-      }
-    }
-  }
-
-  // Check if this case in unreachable (i.e. if there are any inconsistent
-  // e-classes in the e-graph)
-
-  // TODO: Right now we only look for contradictions using the canonical
-  // form analysis. We currently don't generate contradictions from the
-  // cvec analysis, but we should be able to. However, even if we find
-  // a cvec contradiction, it isn't as easy to use in our proof.
-  //
-  // If we find a contradiction from the cvecs, we need to first find which
-  // enodes the cvecs came from, then we need to explain why those nodes are
-  // equal, then we need to provide the concrete values that cause them to
-  // be unequal. This will probably require us to update the Cvec analysis
-  // to track enodes, which is a little unfortunate.
-  let inconsistent_exprs = egraph.classes().find_map(|eclass| {
-    if let CanonicalForm::Inconsistent(n1, n2) = &eclass.data.canonical_form_data {
-      // println!("Proof by contradiction {} != {}", n1, n2);
-
-      // FIXME: these nodes might have been removed, we'll need to be
-      // careful about how we generate this proof. Perhaps we can generate
-      // the proof when we discover the contradiction, since we hopefully
-      // will not have finished removing the e-node at this point.
-      if egraph.lookup(n1.clone()).is_none() || egraph.lookup(n2.clone()).is_none() {
-        println!(
-          "One of {} or {} was removed from the e-graph! We can't emit a proof",
-          n1, n2
-        );
-        None
-      } else {
-        // This is here only for the purpose of proof generation:
-        let extractor = Extractor::new(egraph, AstSize);
-        let expr1 = extract_with_node(n1, &extractor);
-        let expr2 = extract_with_node(n2, &extractor);
-        if CONFIG.verbose {
-          println!("{}: {} = {}", "UNREACHABLE".bright_red(), expr1, expr2);
-        }
-        Some((expr1, expr2))
-      }
-    } else {
-      None
-    }
-  });
-  if let Some((expr1, expr2)) = inconsistent_exprs {
-    let explanation = egraph.explain_equivalence(&expr1, &expr2);
-    Some(ProofLeaf::Contradiction(explanation))
-  } else {
-    None
-  }
 }
 
 pub fn prove_top(

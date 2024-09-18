@@ -2,7 +2,6 @@ use egg::*;
 use lazy_static::lazy_static;
 
 use indexmap::IndexMap;
-use std::collections::HashSet;
 use std::{
   collections::{BTreeMap, BTreeSet},
   fmt::Display,
@@ -771,13 +770,15 @@ pub enum AU<Op, T> {
   Hole(T),
 }
 
-impl<Op: std::cmp::Eq + std::hash::Hash, T: std::cmp::Eq + std::hash::Hash> AU<Op, T> {
-  pub fn extract_holes(&self) -> HashSet<&AU<Op, T>> {
+impl<Op: std::cmp::Eq + std::hash::Hash, T: std::cmp::Eq + std::hash::Hash + Ord> AU<Op, T> {
+  pub fn extract_holes(self) -> BTreeSet<T> {
     match self {
-      Self::Hole(_) => HashSet::from_iter([self]),
-      Self::Node(_, aus) => {
-        HashSet::from_iter(aus.iter().flat_map(|au| au.extract_holes().into_iter()))
+      Self::Hole(st) => {
+        let mut set = BTreeSet::new();
+        set.insert(st);
+        set
       }
+      Self::Node(_, aus) => aus.into_iter().flat_map(|au| au.extract_holes()).collect(),
     }
   }
 }

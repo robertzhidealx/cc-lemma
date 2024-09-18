@@ -224,7 +224,6 @@ fn prove_goal<'a>(
     }
   }
   let duration = start_time.elapsed();
-  // TODO: try this
   if CONFIG.emit_proofs {
     if let Outcome::Valid = result {
       let filename = goal_name_to_filename(&goal.name);

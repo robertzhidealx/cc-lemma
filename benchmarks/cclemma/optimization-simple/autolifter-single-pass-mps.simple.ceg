@@ -26,5 +26,5 @@
   (:: mainNew (-> (List) Nat))
   (let mainNew ((Nil ?tv21)) Zero)
   (let mainNew ((Cons ?tv22 ?tv23)) (ite1 (lq (plus ?tv22 (mainNew ?tv23)) Zero) (plus ?tv22 (mainNew ?tv23)) Zero))
-  (=== optimize (inp0) (List) (mps inp0) (mainNew inp0))
+  (=== autolifter-single-pass-mps (inp0) (List) (mps inp0) (mainNew inp0))
 )

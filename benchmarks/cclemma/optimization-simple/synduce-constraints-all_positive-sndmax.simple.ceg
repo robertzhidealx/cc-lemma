@@ -61,5 +61,5 @@
   (let allpos1 ((Concat ?tv46 ?tv47)) (MakeTuple3 (ite2 (and (lq (snd3 (allpos1 ?tv47)) (snd3 (allpos1 ?tv46))) (lq (fst3 (allpos1 ?tv46)) (snd3 (allpos1 ?tv47)))) (snd3 (allpos1 ?tv47)) (ite2 (lq (snd3 (allpos1 ?tv46)) (fst3 (allpos1 ?tv47))) (fst3 (allpos1 ?tv47)) (ite2 (lq (snd3 (allpos1 ?tv47)) (snd3 (allpos1 ?tv46))) (fst3 (allpos1 ?tv46)) (snd3 (allpos1 ?tv46))))) (max (snd3 (allpos1 ?tv46)) (snd3 (allpos1 ?tv47)))))
   (:: mainNew (-> (CList) Nat))
   (let mainNew (?tv48) (ite2 (allpos ?tv48) (fst3 (allpos1 ?tv48)) Zero))
-  (=== optimize (inp0) (CList) (main inp0) (mainNew inp0))
+  (=== synduce-constraints-all_positive-sndmax (inp0) (CList) (main inp0) (mainNew inp0))
 )

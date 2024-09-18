@@ -46,5 +46,5 @@
   (let reprNew ((Cnil ?tv28)) (MakeTuple3 Zero Zero))
   (let reprNew ((Single ?tv29)) (MakeTuple3 (ite2 (lq ?tv29 Zero) Zero ?tv29) ?tv29))
   (let reprNew ((Concat ?tv30 ?tv31)) (MakeTuple3 (ite2 (lq (fst3 (reprNew ?tv30)) (plus (snd3 (reprNew ?tv30)) (fst3 (reprNew ?tv31)))) (plus (snd3 (reprNew ?tv30)) (fst3 (reprNew ?tv31))) (fst3 (reprNew ?tv30))) (plus (snd3 (reprNew ?tv30)) (snd3 (reprNew ?tv31)))))
-  (=== optimize (inp0) (CList) (fst3 (spec (repr inp0))) (fst3 (reprNew inp0)))
+  (=== synduce-constraints-ensures-mps_no_ensures (inp0) (CList) (fst3 (spec (repr inp0))) (fst3 (reprNew inp0)))
 )

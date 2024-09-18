@@ -42,5 +42,5 @@
   (:: mainNew (-> (List) Tuple2))
   (let mainNew ((Nil ?tv32)) (MakeTuple2 (Succ Zero) (Succ Zero)))
   (let mainNew ((Cons ?tv33 ?tv34)) (MakeTuple2 (plus (fst2 (mainNew ?tv34)) (times ?tv33 (snd2 (mainNew ?tv34)))) (times ?tv33 (snd2 (mainNew ?tv34)))))
-  (=== optimize (inp0) (List) (main inp0) (fst2 (mainNew inp0)))
+  (=== fusion-identities-page5 (inp0) (List) (main inp0) (fst2 (mainNew inp0)))
 )

@@ -48,5 +48,5 @@
   (let tf9 (?tv35 (Cons ?tv37 ?tv38)) (step ?tv37 (tf9 ?tv35 ?tv38)))
   (:: fold (-> (List) Tuple3))
   (let fold (?tv30) (tf9 (MakeTuple3 (Succ Zero) (Succ Zero)) ?tv30))
-  (=== optimize (inp0) (List) (maximum (map (tails inp0 inp0))) (fst3 (fold inp0)))
+  (=== mtp-base (inp0) (List) (maximum (map (tails inp0 inp0))) (fst3 (fold inp0)))
 )

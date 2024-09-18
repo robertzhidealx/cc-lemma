@@ -19,5 +19,5 @@
   (:: mainNew (-> (List) Nat))
   (let mainNew ((Nil ?tv21)) Zero)
   (let mainNew ((Cons ?tv22 ?tv23)) (plus ?tv22 (mainNew ?tv23)))
-  (=== optimize (inp0) (List) (sum inp0) (mainNew inp0))
+  (=== autolifter-single-pass-sum (inp0) (List) (sum inp0) (mainNew inp0))
 )

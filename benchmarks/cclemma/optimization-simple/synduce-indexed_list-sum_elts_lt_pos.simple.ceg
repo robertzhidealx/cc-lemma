@@ -41,5 +41,5 @@
   (:: mainNew (-> (List) Nat))
   (let mainNew ((Nil ?tv23)) Zero)
   (let mainNew ((Cons ?tv24 ?tv25)) (ite2 (lq (length ?tv25) ?tv24) (plus (mainNew ?tv25) ?tv24) (mainNew ?tv25)))
-  (=== optimize (inp0) (List) (main inp0) (mainNew inp0))
+  (=== synduce-indexed_list-sum_elts_lt_pos (inp0) (List) (main inp0) (mainNew inp0))
 )

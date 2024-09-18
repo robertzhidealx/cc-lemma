@@ -42,5 +42,5 @@
   (let reprNew ((Node ?tv32 ?tv33 ?tv34)) (MakeTuple2 (min (fst2 (reprNew ?tv33)) (min (fst2 (reprNew ?tv34)) ?tv32)) (max (snd2 (reprNew ?tv33)) (max (snd2 (reprNew ?tv34)) ?tv32))))
   (:: mainNew (-> (Tree) Tuple2))
   (let mainNew (?tv35) (MakeTuple2 (fst2 (reprNew ?tv35)) (snd2 (reprNew ?tv35))))
-  (=== optimize (inp0) (Tree) (main inp0) (mainNew inp0))
+  (=== synduce-tree-minmax (inp0) (Tree) (main inp0) (mainNew inp0))
 )

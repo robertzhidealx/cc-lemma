@@ -36,5 +36,5 @@
   (let mainNew ((Cnil ?tv26)) (Succ Zero))
   (let mainNew ((Single ?tv27)) ?tv27)
   (let mainNew ((Concat ?tv28 ?tv29)) (times (mainNew ?tv29) (mainNew ?tv28)))
-  (=== optimize (inp0) (CList) (main inp0) (mainNew inp0))
+  (=== synduce-list-prodhom (inp0) (CList) (main inp0) (mainNew inp0))
 )

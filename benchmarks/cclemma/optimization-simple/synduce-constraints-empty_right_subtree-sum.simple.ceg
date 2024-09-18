@@ -46,5 +46,5 @@
   (let targetNew ((Node ?tv38 ?tv39 ?tv40)) (plus (targetNew ?tv39) ?tv38))
   (:: mainNew (-> (Tree) Nat))
   (let mainNew (?tv41) (ite1 (emptyright ?tv41) (targetNew ?tv41)))
-  (=== optimize (inp0) (Tree) (main inp0) (mainNew inp0))
+  (=== synduce-constraints-empty_right_subtree-sum (inp0) (Tree) (main inp0) (mainNew inp0))
 )

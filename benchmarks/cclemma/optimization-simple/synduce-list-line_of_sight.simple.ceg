@@ -54,5 +54,5 @@
   (:: mainNew (-> (CList) Tuple4))
   (let mainNew ((Elt ?tv27)) (MakeTuple4 True ?tv27))
   (let mainNew ((Cat ?tv28 ?tv29)) (MakeTuple4 (and (fst4 (mainNew ?tv28)) (lq (snd4 (mainNew ?tv29)) (snd4 (mainNew ?tv28)))) (max (snd4 (mainNew ?tv29)) (snd4 (mainNew ?tv28)))))
-  (=== optimize (inp0) (CList) (main inp0) (fst4 (mainNew inp0)))
+  (=== synduce-list-line_of_sight (inp0) (CList) (main inp0) (fst4 (mainNew inp0)))
 )
