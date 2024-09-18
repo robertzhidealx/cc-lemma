@@ -51,5 +51,5 @@
   (let targetNew ((Concat ?tv55 ?tv56)) (targetNew ?tv56))
   (:: mainNew (-> (CList) Nat))
   (let mainNew (?tv57) (ite2 (ispart ?tv57) (targetNew ?tv57) Zero))
-  (=== synduce-constraints-sortedlist-parallel_max (inp0) (CList) (main inp0) (mainNew inp0))
+  (=== synduce_constraints_sortedlist_parallel_max (inp0) (CList) (main inp0) (mainNew inp0))
 )

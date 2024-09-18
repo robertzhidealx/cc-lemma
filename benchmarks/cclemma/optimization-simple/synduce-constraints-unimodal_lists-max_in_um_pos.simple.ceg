@@ -62,5 +62,5 @@
   (let targetNew ((Usplit ?tv53 ?tv54 ?tv55 ?tv56)) (ite3 (and (lq (targetNew ?tv56) (max ?tv55 ?tv54)) (lq (targetNew ?tv53) (max ?tv55 ?tv54))) (max ?tv55 ?tv54) (ite3 (lq (targetNew ?tv56) (targetNew ?tv53)) (targetNew ?tv53) (targetNew ?tv56))))
   (:: mainNew (-> (UList) Nat))
   (let mainNew (?tv57) (ite3 (isunimodal (repr (Nil Null) ?tv57)) (targetNew ?tv57) Zero))
-  (=== synduce-constraints-unimodal_lists-max_in_um_pos (inp0) (UList) (main inp0) (mainNew inp0))
+  (=== synduce_constraints_unimodal_lists_max_in_um_pos (inp0) (UList) (main inp0) (mainNew inp0))
 )

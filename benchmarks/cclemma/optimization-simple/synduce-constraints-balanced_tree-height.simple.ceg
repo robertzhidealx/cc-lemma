@@ -44,5 +44,5 @@
   (let targetNew ((Node ?tv28 ?tv29 ?tv30)) (plus (targetNew ?tv30) (Succ Zero)))
   (:: mainNew (-> (Tree) Nat))
   (let mainNew (?tv31) (ite1 (balanced ?tv31) (targetNew ?tv31) Zero))
-  (=== synduce-constraints-balanced_tree-height (inp0) (Tree) (main inp0) (mainNew inp0))
+  (=== synduce_constraints_balanced_tree_height (inp0) (Tree) (main inp0) (mainNew inp0))
 )

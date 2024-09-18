@@ -77,5 +77,5 @@
   (:: mainNew (-> (CnList) Tuple4))
   (let mainNew ((Sglt ?tv28)) (MakeTuple4 (max ?tv28 Zero) (times (Succ (Succ Zero)) (max ?tv28 Zero)) ?tv28 ?tv28))
   (let mainNew ((Cat ?tv29 ?tv30 ?tv31)) (MakeTuple4 (ite2 (or (and (nateq (fourth4 (mainNew ?tv31)) Zero) (nateq (fst4 (mainNew ?tv31)) (third4 (mainNew ?tv31)))) (lq (fst4 (mainNew ?tv31)) (snd4 (mainNew ?tv31)))) (plus (fst4 (mainNew ?tv31)) (fst4 (mainNew ?tv29))) (fst4 (mainNew ?tv31))) (ite2 (or (or (and (lq (fst4 (mainNew ?tv31)) (snd4 (mainNew ?tv31))) (lq (fst4 (mainNew ?tv29)) (snd4 (mainNew ?tv29)))) (and (nateq (fourth4 (mainNew ?tv31)) Zero) (nateq (fst4 (mainNew ?tv31)) (third4 (mainNew ?tv31))))) (and (nateq (fourth4 (mainNew ?tv29)) Zero) (nateq (fst4 (mainNew ?tv29)) (third4 (mainNew ?tv29))))) (plus (snd4 (mainNew ?tv31)) (snd4 (mainNew ?tv29))) (ite2 (or (and (lq Zero (fourth4 (mainNew ?tv31))) (nateq (fst4 (mainNew ?tv31)) (snd4 (mainNew ?tv31)))) (lq (third4 (mainNew ?tv31)) (fst4 (mainNew ?tv31)))) (fst4 (mainNew ?tv31)) (plus (fst4 (mainNew ?tv31)) (fst4 (mainNew ?tv29))))) (plus (third4 (mainNew ?tv31)) (third4 (mainNew ?tv29))) (max (fourth4 (mainNew ?tv31)) (fourth4 (mainNew ?tv29)))))
-  (=== synduce-list-slsp (inp0) (CnList) (main inp0) (fst4 (mainNew inp0)))
+  (=== synduce_list_slsp (inp0) (CnList) (main inp0) (fst4 (mainNew inp0)))
 )

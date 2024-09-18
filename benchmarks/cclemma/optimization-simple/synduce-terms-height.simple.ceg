@@ -88,5 +88,5 @@
   (let mainNew ((Var ?tv71)) (Succ Zero))
   (let mainNew ((CInt ?tv72)) (Succ Zero))
   (let mainNew ((CBool ?tv73)) (Succ Zero))
-  (=== synduce-terms-height (inp0) (Term2) (main inp0) (mainNew inp0))
+  (=== synduce_terms_height (inp0) (Term2) (main inp0) (mainNew inp0))
 )

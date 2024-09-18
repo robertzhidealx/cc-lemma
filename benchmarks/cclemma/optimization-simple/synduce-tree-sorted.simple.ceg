@@ -36,5 +36,5 @@
   (:: mainNew (-> (Tree) Tuple2))
   (let mainNew ((Leaf ?tv18)) (MakeTuple2 True ?tv18))
   (let mainNew ((Node ?tv19 ?tv20 ?tv21)) (MakeTuple2 (and (and (and (lq (snd2 (mainNew ?tv20)) ?tv19) (fst2 (mainNew ?tv21))) (fst2 (mainNew ?tv20))) (lq ?tv19 (snd2 (mainNew ?tv21)))) ?tv19))
-  (=== synduce-tree-sorted (inp0) (Tree) (main inp0) (fst2 (mainNew inp0)))
+  (=== synduce_tree_sorted (inp0) (Tree) (main inp0) (fst2 (mainNew inp0)))
 )

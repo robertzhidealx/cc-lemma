@@ -37,5 +37,5 @@
   (:: reprNew (-> (List) Tuple2))
   (let reprNew ((Nil ?tv25)) (MakeTuple2 Zero Zero))
   (let reprNew ((Cons ?tv26 ?tv27)) (MakeTuple2 (max (fst2 (reprNew ?tv27)) (plus ?tv26 (snd2 (reprNew ?tv27)))) (plus ?tv26 (snd2 (reprNew ?tv27)))))
-  (=== synduce-combine-mts (inp0) (List) (spec inp0) (fst2 (reprNew inp0)))
+  (=== synduce_combine_mts (inp0) (List) (spec inp0) (fst2 (reprNew inp0)))
 )

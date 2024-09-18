@@ -48,5 +48,5 @@
   (let mainNew ((Cnil ?tv28)) (MakeTuple3 Zero Zero))
   (let mainNew ((Single ?tv29)) (MakeTuple3 (ite2 (lq ?tv29 Zero) Zero ?tv29) ?tv29))
   (let mainNew ((Concat ?tv30 ?tv31)) (MakeTuple3 (max (fst3 (mainNew ?tv31)) (plus (snd3 (mainNew ?tv31)) (fst3 (mainNew ?tv30)))) (plus (snd3 (mainNew ?tv31)) (snd3 (mainNew ?tv30)))))
-  (=== synduce-list-mtshom (inp0) (CList) (main inp0) (fst3 (mainNew inp0)))
+  (=== synduce_list_mtshom (inp0) (CList) (main inp0) (fst3 (mainNew inp0)))
 )

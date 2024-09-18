@@ -27,5 +27,5 @@
   (:: mainNew (-> (Tree) Nat))
   (let mainNew ((Nil ?tv22)) Zero)
   (let mainNew ((Node ?tv23 ?tv24 ?tv25)) (max ?tv23 (max (mainNew ?tv25) (mainNew ?tv24))))
-  (=== synduce-tree-maxtree (inp0) (Tree) (main inp0) (mainNew inp0))
+  (=== synduce_tree_maxtree (inp0) (Tree) (main inp0) (mainNew inp0))
 )

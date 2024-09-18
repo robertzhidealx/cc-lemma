@@ -51,5 +51,5 @@
   (let targetNew ((Icons ?tv43 ?tv44 ?tv45)) (ite2 (lq (targetNew ?tv45) ?tv44) ?tv44 (targetNew ?tv45)))
   (:: mainNew (-> (MList) Nat))
   (let mainNew (?tv46) (ite2 (ismemo ?tv46 ?tv46) (targetNew ?tv46) Zero))
-  (=== synduce-constraints-memo-mts_memo_sum (inp0) (MList) (main inp0) (mainNew inp0))
+  (=== synduce_constraints_memo_mts_memo_sum (inp0) (MList) (main inp0) (mainNew inp0))
 )

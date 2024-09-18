@@ -56,5 +56,5 @@
   (let allpos1 ((Concat ?tv44 ?tv45)) (plus (allpos1 ?tv45) (allpos1 ?tv44)))
   (:: mainNew (-> (CList) Nat))
   (let mainNew (?tv46) (ite2 (allpos ?tv46) (allpos1 ?tv46) Zero))
-  (=== synduce-constraints-all_positive-list_mps (inp0) (CList) (main inp0) (mainNew inp0))
+  (=== synduce_constraints_all_positive_list_mps (inp0) (CList) (main inp0) (mainNew inp0))
 )

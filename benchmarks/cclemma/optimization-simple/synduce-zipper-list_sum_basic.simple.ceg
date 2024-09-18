@@ -30,5 +30,5 @@
   (let main (?tv28) (sum (repr ?tv28)))
   (:: mainNew (-> (Zipper) Nat))
   (let mainNew ((Zip ?tv31 ?tv32)) (plus (sum ?tv31) (sum ?tv32)))
-  (=== synduce-zipper-list_sum_basic (inp0) (Zipper) (main inp0) (mainNew inp0))
+  (=== synduce_zipper_list_sum_basic (inp0) (Zipper) (main inp0) (mainNew inp0))
 )

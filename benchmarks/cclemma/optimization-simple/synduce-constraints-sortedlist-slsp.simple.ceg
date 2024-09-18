@@ -74,5 +74,5 @@
   (let targetNew ((Concat ?tv58 ?tv59 ?tv60)) (ite2 (leq ?tv58 Zero) (targetNew ?tv60) (plus (targetNew ?tv60) (targetNew ?tv59))))
   (:: mainNew (-> (CList) Nat))
   (let mainNew (?tv61) (ite2 (isparti ?tv61) (targetNew ?tv61) Zero))
-  (=== synduce-constraints-sortedlist-slsp (inp0) (CList) (main inp0) (mainNew inp0))
+  (=== synduce_constraints_sortedlist_slsp (inp0) (CList) (main inp0) (mainNew inp0))
 )

@@ -47,5 +47,5 @@
   (:: mainNew (-> (List) Tuple2))
   (let mainNew ((Nil ?tv29)) (MakeTuple2 Zero Zero))
   (let mainNew ((Cons ?tv30 ?tv31)) (MakeTuple2 (ite1 (or (or (not ?tv30) (nateq (fst2 (mainNew ?tv31)) (snd2 (mainNew ?tv31)))) (alhead ?tv31)) (fst2 (mainNew ?tv31)) (plus (Succ Zero) (fst2 (mainNew ?tv31)))) (ite1 (not ?tv30) (snd2 (mainNew ?tv31)) (plus (Succ Zero) (snd2 (mainNew ?tv31))))))
-  (=== autolifter-single-pass-count10p (inp0) (List) (count10p False False inp0) (fst2 (mainNew inp0)))
+  (=== autolifter_single_pass_count10p (inp0) (List) (count10p False False inp0) (fst2 (mainNew inp0)))
 )

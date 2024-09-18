@@ -34,5 +34,5 @@
   (:: reprNew (-> (MyNat) Tuple0))
   (let reprNew ((Myzero ?tv16)) (MakeTuple0 Zero Zero))
   (let reprNew ((Mysucc ?tv17)) (MakeTuple0 (ite1 (nateq (fst0 (reprNew ?tv17)) (snd0 (reprNew ?tv17))) (plus (Succ Zero) (fst0 (reprNew ?tv17))) (plus (fst0 (reprNew ?tv17)) (snd0 (reprNew ?tv17)))) (fst0 (reprNew ?tv17))))
-  (=== fusion-tupling-page8 (inp0) (MyNat) (fib inp0) (fst0 (reprNew inp0)))
+  (=== fusion_tupling_page8 (inp0) (MyNat) (fib inp0) (fst0 (reprNew inp0)))
 )

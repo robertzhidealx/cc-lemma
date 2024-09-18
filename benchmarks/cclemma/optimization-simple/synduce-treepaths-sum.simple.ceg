@@ -30,5 +30,5 @@
   (let mainNew ((Top ?tv21)) Zero)
   (let mainNew ((Left ?tv22 ?tv23 ?tv24)) (plus (mainNew ?tv24) (plus ?tv22 (sum ?tv23))))
   (let mainNew ((Right ?tv25 ?tv26 ?tv27)) (plus (mainNew ?tv27) (plus ?tv25 (sum ?tv26))))
-  (=== synduce-treepaths-sum (inp0) (Zipper) (main inp0) (mainNew inp0))
+  (=== synduce_treepaths_sum (inp0) (Zipper) (main inp0) (mainNew inp0))
 )

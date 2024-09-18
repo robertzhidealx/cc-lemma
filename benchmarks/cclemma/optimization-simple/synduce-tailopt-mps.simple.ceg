@@ -44,5 +44,5 @@
   (let reprNew (?tv30 (Cons ?tv32 ?tv33)) (reprNew (MakeTuple2 (max (fst2 ?tv30) (plus ?tv32 (snd2 ?tv30))) (plus ?tv32 (snd2 ?tv30))) ?tv33))
   (:: mainNew (-> (List) Nat))
   (let mainNew (?tv34) (fst2 (reprNew (MakeTuple2 Zero Zero) ?tv34)))
-  (=== synduce-tailopt-mps (inp0) (List) (main inp0) (mainNew inp0))
+  (=== synduce_tailopt_mps (inp0) (List) (main inp0) (mainNew inp0))
 )

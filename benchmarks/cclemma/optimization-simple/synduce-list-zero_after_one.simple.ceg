@@ -56,5 +56,5 @@
   (let mainNew ((Emp ?tv28)) (MakeTuple3 False True True False))
   (let mainNew ((Single ?tv29)) (MakeTuple3 False ?tv29 False False))
   (let mainNew ((Concat ?tv30 ?tv31)) (MakeTuple3 (or (or (and (and (not (snd3 (mainNew ?tv30))) (not (third3 (mainNew ?tv31)))) (or (fst3 (mainNew ?tv31)) (snd3 (mainNew ?tv31)))) (and (and (or (fst3 (mainNew ?tv31)) (fourth3 (mainNew ?tv30))) (not (third3 (mainNew ?tv31)))) (or (fst3 (mainNew ?tv31)) (snd3 (mainNew ?tv31))))) (or (fst3 (mainNew ?tv31)) (fst3 (mainNew ?tv30)))) (or (and (snd3 (mainNew ?tv31)) (snd3 (mainNew ?tv30))) (and (snd3 (mainNew ?tv30)) (not (third3 (mainNew ?tv30))))) (and (third3 (mainNew ?tv31)) (third3 (mainNew ?tv30))) (or (or (and (and (not (snd3 (mainNew ?tv31))) (not (third3 (mainNew ?tv30)))) (or (snd3 (mainNew ?tv31)) (snd3 (mainNew ?tv30)))) (and (and (not (snd3 (mainNew ?tv30))) (not (third3 (mainNew ?tv31)))) (or (snd3 (mainNew ?tv31)) (fourth3 (mainNew ?tv31))))) (or (fourth3 (mainNew ?tv31)) (fourth3 (mainNew ?tv30))))))
-  (=== synduce-list-zero_after_one (inp0) (CList) (main inp0) (fst3 (mainNew inp0)))
+  (=== synduce_list_zero_after_one (inp0) (CList) (main inp0) (fst3 (mainNew inp0)))
 )

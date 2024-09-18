@@ -37,5 +37,5 @@
   (:: mainNew (-> (Tree) Tuple1))
   (let mainNew ((Tip ?tv23)) (MakeTuple1 Zero ?tv23))
   (let mainNew ((Bin ?tv24 ?tv25)) (MakeTuple1 (plus (plus (plus (fst1 (mainNew ?tv24)) (snd1 (mainNew ?tv24))) (fst1 (mainNew ?tv25))) (snd1 (mainNew ?tv25))) (plus (snd1 (mainNew ?tv24)) (snd1 (mainNew ?tv25)))))
-  (=== fusion-algprog-ex3 (inp0) (Tree) (main inp0) (fst1 (mainNew inp0)))
+  (=== fusion_algprog_ex3 (inp0) (Tree) (main inp0) (fst1 (mainNew inp0)))
 )

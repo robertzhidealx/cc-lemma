@@ -56,5 +56,5 @@
   (let reprNew ((Concat ?tv30 ?tv31)) (MakeTuple3 (max (fst3 (reprNew ?tv30)) (plus (fst3 (reprNew ?tv31)) (third3 (reprNew ?tv30)))) (ite2 (lq (plus (third3 (reprNew ?tv31)) (snd3 (reprNew ?tv30))) (snd3 (reprNew ?tv31))) (snd3 (reprNew ?tv31)) (plus (third3 (reprNew ?tv31)) (snd3 (reprNew ?tv30)))) (plus (third3 (reprNew ?tv31)) (third3 (reprNew ?tv30)))))
   (:: mainNew (-> (CList) Tuple4))
   (let mainNew (?tv32) (MakeTuple4 (fst3 (reprNew ?tv32)) (snd3 (reprNew ?tv32))))
-  (=== synduce-list-mts_and_mps_hom (inp0) (CList) (main inp0) (mainNew inp0))
+  (=== synduce_list_mts_and_mps_hom (inp0) (CList) (main inp0) (mainNew inp0))
 )

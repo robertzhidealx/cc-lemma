@@ -43,5 +43,5 @@
   (let mainNew ((Nfneglit ?tv23)) (not ?tv23))
   (let mainNew ((Nfand ?tv24 ?tv25)) (and (mainNew ?tv25) (mainNew ?tv24)))
   (let mainNew ((Nfor ?tv26 ?tv27)) (or (mainNew ?tv26) (mainNew ?tv27)))
-  (=== synduce-misc-simple_nnf (inp0) (NnfFormula) (main inp0) (mainNew inp0))
+  (=== synduce_misc_simple_nnf (inp0) (NnfFormula) (main inp0) (mainNew inp0))
 )

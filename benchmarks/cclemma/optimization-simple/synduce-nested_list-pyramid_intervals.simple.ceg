@@ -69,5 +69,5 @@
   (let targetNew ((Ncons ?tv28 ?tv29)) (MakeTuple5 (and (and (leq (snd5 (targetNew ?tv29)) (fst3 (interval ?tv28))) (fst5 (targetNew ?tv29))) (leq (third5 (targetNew ?tv29)) (snd3 (interval ?tv28)))) (snd5 (targetNew ?tv29)) (snd3 (interval ?tv28))))
   (:: mainNew (-> (NList) Bool))
   (let mainNew (?tv30) (fst5 (targetNew ?tv30)))
-  (=== synduce-nested_list-pyramid_intervals (inp0) (NList) (main inp0) (mainNew inp0))
+  (=== synduce_nested_list_pyramid_intervals (inp0) (NList) (main inp0) (mainNew inp0))
 )

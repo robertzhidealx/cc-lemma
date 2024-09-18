@@ -90,5 +90,5 @@
   (let targetNew ((Cat ?tv73 ?tv74 ?tv75)) (ite3 (leq ?tv74 Zero) (targetNew ?tv75) (plus (targetNew ?tv75) (targetNew ?tv73))))
   (:: mainNew (-> (CList) Nat))
   (let mainNew (?tv76) (ite3 (sorted ?tv76) (targetNew ?tv76) Zero))
-  (=== synduce-constraints-sortedlist-failing_slspplus (inp0) (CList) (main inp0) (mainNew inp0))
+  (=== synduce_constraints_sortedlist_failing_slspplus (inp0) (CList) (main inp0) (mainNew inp0))
 )

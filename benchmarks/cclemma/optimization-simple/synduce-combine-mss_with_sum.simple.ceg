@@ -60,5 +60,5 @@
   (:: reprNew (-> (IdxList) Tuple4))
   (let reprNew ((Ielt ?tv26)) (MakeTuple4 (max ?tv26 Zero) ?tv26))
   (let reprNew ((Icons ?tv27 ?tv28 ?tv29)) (MakeTuple4 (ite2 (and (lq (plus ?tv27 (snd4 (reprNew ?tv29))) (fst4 (reprNew ?tv29))) (lq ?tv27 (fst4 (reprNew ?tv29)))) (fst4 (reprNew ?tv29)) (ite2 (lq (snd4 (reprNew ?tv29)) Zero) ?tv27 (plus ?tv27 (snd4 (reprNew ?tv29))))) (plus ?tv27 (max (snd4 (reprNew ?tv29)) Zero))))
-  (=== synduce-combine-mss_with_sum (inp0) (IdxList) (third3 (spec (repr inp0))) (fst4 (reprNew inp0)))
+  (=== synduce_combine_mss_with_sum (inp0) (IdxList) (third3 (spec (repr inp0))) (fst4 (reprNew inp0)))
 )

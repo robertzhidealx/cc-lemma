@@ -21,5 +21,5 @@
   (:: mainNew (-> (Tree) Nat))
   (let mainNew ((Nil ?tv20)) Zero)
   (let mainNew ((Node ?tv21 ?tv22 ?tv23)) (plus (mainNew ?tv23) (plus (mainNew ?tv22) ?tv21)))
-  (=== synduce-tree-sumtree (inp0) (Tree) (main inp0) (mainNew inp0))
+  (=== synduce_tree_sumtree (inp0) (Tree) (main inp0) (mainNew inp0))
 )

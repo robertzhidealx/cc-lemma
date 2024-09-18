@@ -34,5 +34,5 @@
   (:: mainNew (-> (Tree) Nat))
   (let mainNew ((Tip ?tv30)) Zero)
   (let mainNew ((Bin ?tv31 ?tv32)) (ite1 (lq (mainNew ?tv31) (mainNew ?tv32)) (plus (Succ Zero) (mainNew ?tv32)) (plus (Succ Zero) (mainNew ?tv31))))
-  (=== fusion-algprog-page60 (inp0) (Tree) (main inp0) (mainNew inp0))
+  (=== fusion_algprog_page60 (inp0) (Tree) (main inp0) (mainNew inp0))
 )

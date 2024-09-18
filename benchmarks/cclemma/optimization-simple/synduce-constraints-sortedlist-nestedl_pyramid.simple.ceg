@@ -82,5 +82,5 @@
   (let targetNew ((Ncons ?tv52 ?tv53)) (MakeTuple6 (and (fst6 (targetNew ?tv53)) (leq (snd6 (targetNew ?tv53)) (lmin ?tv52))) (snd6 (targetNew ?tv53))))
   (:: mainNew (-> (NList) Bool))
   (let mainNew (?tv54) (ite5 (issorted ?tv54) (fst6 (targetNew ?tv54))))
-  (=== synduce-constraints-sortedlist-nestedl_pyramid (inp0) (NList) (main inp0) (mainNew inp0))
+  (=== synduce_constraints_sortedlist_nestedl_pyramid (inp0) (NList) (main inp0) (mainNew inp0))
 )

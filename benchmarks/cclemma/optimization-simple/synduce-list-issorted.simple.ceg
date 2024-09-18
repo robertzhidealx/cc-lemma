@@ -49,5 +49,5 @@
   (:: mainNew (-> (CList) Tuple3))
   (let mainNew ((Single ?tv25)) (MakeTuple3 True ?tv25 ?tv25))
   (let mainNew ((Concat ?tv26 ?tv27)) (MakeTuple3 (and (and (fst3 (mainNew ?tv26)) (fst3 (mainNew ?tv27))) (lq (third3 (mainNew ?tv26)) (snd3 (mainNew ?tv27)))) (snd3 (mainNew ?tv26)) (third3 (mainNew ?tv27))))
-  (=== synduce-list-issorted (inp0) (CList) (main inp0) (fst3 (mainNew inp0)))
+  (=== synduce_list_issorted (inp0) (CList) (main inp0) (fst3 (mainNew inp0)))
 )

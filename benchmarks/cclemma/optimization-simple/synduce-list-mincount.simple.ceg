@@ -48,5 +48,5 @@
   (:: mainNew (-> (CList) Tuple3))
   (let mainNew ((Single ?tv27)) (MakeTuple3 (Succ Zero) ?tv27))
   (let mainNew ((Concat ?tv28 ?tv29)) (MakeTuple3 (ite2 (lq (snd3 (mainNew ?tv28)) (snd3 (mainNew ?tv29))) (fst3 (mainNew ?tv28)) (ite2 (nateq (snd3 (mainNew ?tv29)) (snd3 (mainNew ?tv28))) (plus (fst3 (mainNew ?tv29)) (fst3 (mainNew ?tv28))) (fst3 (mainNew ?tv29)))) (min (snd3 (mainNew ?tv29)) (snd3 (mainNew ?tv28)))))
-  (=== synduce-list-mincount (inp0) (CList) (main inp0) (fst3 (mainNew inp0)))
+  (=== synduce_list_mincount (inp0) (CList) (main inp0) (fst3 (mainNew inp0)))
 )

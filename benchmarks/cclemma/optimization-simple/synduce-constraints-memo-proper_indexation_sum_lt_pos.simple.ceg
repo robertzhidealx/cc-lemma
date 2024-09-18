@@ -64,5 +64,5 @@
   (let targetNew ((Icons ?tv46 ?tv47 ?tv48)) (MakeTuple3 (ite2 (leq ?tv46 (snd3 (targetNew ?tv48))) (fst3 (targetNew ?tv48)) (plus ?tv46 (fst3 (targetNew ?tv48)))) (plus (snd3 (targetNew ?tv48)) (Succ Zero))))
   (:: mainNew (-> (IDList) Nat))
   (let mainNew (?tv49) (ite2 (isindexed ?tv49) (fst3 (targetNew ?tv49)) Zero))
-  (=== synduce-constraints-memo-proper_indexation_sum_lt_pos (inp0) (IDList) (main inp0) (mainNew inp0))
+  (=== synduce_constraints_memo_proper_indexation_sum_lt_pos (inp0) (IDList) (main inp0) (mainNew inp0))
 )
