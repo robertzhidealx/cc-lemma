@@ -7,11 +7,13 @@ TIME_LIMIT=180
 export RUSTFLAGS="-Awarnings"
 export RUST_BACKTRACE=1
 
+cargo clean
+
 for file in $DIR; do
   echo $file
   # timeout $TIME_LIMIT cargo run --release -- "$file"
-  # timeout $TIME_LIMIT cargo run --release -- --ripple "$file"
-  timeout $TIME_LIMIT cargo run --release -- --ripple -p "$file"
+  timeout $TIME_LIMIT cargo run --release -- --ripple --fallback "$file"
+  # timeout $TIME_LIMIT cargo run --release -- --ripple -p --no-proof-comments "$file"
   # timeout $TIME_LIMIT cargo run --release -- --ripple --no-destructive-rewrites "$file"
   # timeout $TIME_LIMIT cargo run --release -- --ripple --timeout 20 "$file"
   if [ $? -eq 124 ]; then

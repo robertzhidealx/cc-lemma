@@ -130,11 +130,11 @@ impl GoalGraph {
   }
   pub fn exclude_bid_reachable_lemmas(
     &mut self,
-    prop_list: &Vec<(usize, Prop)>,
-  ) -> Vec<(usize, Prop)> {
+    prop_list: &Vec<(usize, Prop, bool)>,
+  ) -> Vec<(usize, Prop, bool)> {
     let id_list: Vec<_> = prop_list
       .iter()
-      .map(|(_, prop)| self.get_prop_id(prop))
+      .map(|(_, prop, _)| self.get_prop_id(prop))
       .collect();
     self.saturate();
 
@@ -246,10 +246,11 @@ impl GoalGraph {
     let father = node.father.clone();
     let children = node.split_children.clone().unwrap();
 
-    if children
-      .into_iter()
-      .all(|child| self.get_goal(&child).status == GraphProveStatus::Valid)
-    {
+    if children.into_iter().all(|child| {
+      // UNCOMMENT
+      // !child.name.starts_with("syntactic-decomp:") &&
+      self.get_goal(&child).status == GraphProveStatus::Valid
+    }) {
       self.get_goal_mut(info).status = GraphProveStatus::Valid;
       if father.is_some() {
         self.check_split_finished(&father.unwrap());
