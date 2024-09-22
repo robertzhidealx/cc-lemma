@@ -636,7 +636,7 @@ pub struct Goal<'a> {
   /// added by Ruyi: to get the size after case split
   pub full_expr: Equation,
   /// Induction hypothesis
-  pub ih: Option<IH>,
+  pub ih: Option<Vec<IH>>,
 }
 
 impl<'a> Goal<'a> {
@@ -754,6 +754,9 @@ impl<'a> Goal<'a> {
     if !CONFIG.ripple_mode {
       rewrites.extend(self.lemmas.values());
     }
+    if CONFIG.verbose {
+      println!("Saturate using lemmas: {:#?}", top_lemmas.keys());
+    }
     let lhs_id = self.eq.lhs.id;
     let rhs_id = self.eq.rhs.id;
     let runner = Runner::default()
@@ -804,23 +807,25 @@ impl<'a> Goal<'a> {
     }
 
     if CONFIG.ripple_mode {
-      if let Some((lhs_ih, rhs_ih)) = &self.ih {
-        if let Some(lhs_matches) = lhs_ih.search_eclass(&self.egraph, resolved_lhs_id) {
-          if let Some(rhs_matches) = rhs_ih.search_eclass(&self.egraph, resolved_rhs_id) {
-            for (lhs_subst, rhs_subst) in lhs_matches
-              .substs
-              .iter()
-              .cartesian_product(&rhs_matches.substs)
-            {
-              let common_vars_consistent = var_set(&rhs_ih.searcher)
-                .intersection(&var_set(&lhs_ih.searcher))
-                .into_iter()
-                .all(|&var| lhs_subst.get(var) == rhs_subst.get(var));
-              if common_vars_consistent {
-                if CONFIG.verbose {
-                  println!("Proof by strong fertilization");
+      if let Some(ihs) = &self.ih {
+        for (lhs_ih, rhs_ih) in ihs {
+          if let Some(lhs_matches) = lhs_ih.search_eclass(&self.egraph, resolved_lhs_id) {
+            if let Some(rhs_matches) = rhs_ih.search_eclass(&self.egraph, resolved_rhs_id) {
+              for (lhs_subst, rhs_subst) in lhs_matches
+                .substs
+                .iter()
+                .cartesian_product(&rhs_matches.substs)
+              {
+                let common_vars_consistent = var_set(&rhs_ih.searcher)
+                  .intersection(&var_set(&lhs_ih.searcher))
+                  .into_iter()
+                  .all(|&var| lhs_subst.get(var) == rhs_subst.get(var));
+                if common_vars_consistent {
+                  if CONFIG.verbose {
+                    println!("Proof by strong fertilization");
+                  }
+                  return Some(ProofLeaf::StrongFertilization(None));
                 }
-                return Some(ProofLeaf::StrongFertilization(None));
               }
             }
           }
@@ -1334,40 +1339,52 @@ impl<'a> Goal<'a> {
     if self.lemmas.is_empty() {
       let premises = self.update_premises();
       let mut rewrites = self.lemmas.clone();
+      let mut ihs = vec![];
+      let lhs = self.egraph.find(self.eq.lhs.id);
+      let rhs = self.egraph.find(self.eq.rhs.id);
+      let lhs_exprs = collect_expressions_with_loops(&self.egraph, lhs);
+      // let smallest_lhs_expr = get_smallest_expr(&lhs_exprs);
+      let rhs_exprs = collect_expressions_with_loops(&self.egraph, rhs);
+      // let smallest_rhs_expr = get_smallest_expr(&rhs_exprs);
       // In the non-cyclic case, only use the original LHS and RHS
       // and only if no other lemmas have been added yet
-      let (lemma_rw, ih_searchers) = self.make_lemma_rewrite(
-        &self.eq.lhs.expr,
-        &self.eq.rhs.expr,
-        &premises,
-        ih_lemma_number,
-        false,
-      );
-      if lemma_rw.is_none() {
-        println!(
-          "{}: {} == {}. params: {:?}",
-          self.name, self.eq.lhs.sexp, self.eq.rhs.sexp, self.top_level_params
+      for (lhs_expr, rhs_expr) in lhs_exprs.iter().zip(&rhs_exprs) {
+        let (lemma_rw, ih_searchers) = self.make_lemma_rewrite(
+          // &self.eq.lhs.expr,
+          lhs_expr,
+          // &self.eq.rhs.expr,
+          &rhs_expr,
+          &premises,
+          ih_lemma_number,
+          false,
         );
-        panic!()
-      }
-
-      if self.ih.is_none() {
-        if let Some((lhs_ih, rhs_ih)) = &ih_searchers {
-          if CONFIG.verbose {
-            println!(
-              "No IH found, create one: {} == {}",
-              lhs_ih.searcher, rhs_ih.searcher,
-            );
-          }
-          // assert!(var_set(&rhs_ih.searcher).is_subset(&var_set(&lhs_ih.searcher)));
-          self.ih = ih_searchers;
+        if lemma_rw.is_none() {
+          println!(
+            "{}: {} == {}. params: {:?}",
+            self.name, self.eq.lhs.sexp, self.eq.rhs.sexp, self.top_level_params
+          );
+          panic!()
         }
-      } else {
-        panic!("IH already exists");
-      }
 
-      let lemma_rw = lemma_rw.unwrap();
-      lemma_rw.add_to_rewrites(&mut rewrites);
+        if let Some((lhs_ih, rhs_ih)) = &ih_searchers {
+          ihs.push((lhs_ih.clone(), rhs_ih.clone()));
+        }
+
+        let lemma_rw = lemma_rw.unwrap();
+        lemma_rw.add_to_rewrites(&mut rewrites);
+      }
+      if self.ih.is_none() {
+        if CONFIG.verbose {
+          println!(
+            "No IHs found, create them:\n{}",
+            ihs
+              .iter()
+              .map(|(lhs_ih, rhs_ih)| format!("{} == {}", lhs_ih.searcher, rhs_ih.searcher))
+              .join("\n")
+          );
+        }
+        self.ih = Some(ihs);
+      }
       return rewrites;
     }
     // Otherwise, we only create lemmas when we are operating in the cyclic mode
@@ -2132,114 +2149,115 @@ impl<'a> Goal<'a> {
     }
 
     // Only ripple when an IH exists, i.e., we are at a goal already case-split
-    if let Some((lhs_ih, rhs_ih)) = self.ih.clone() {
-      if CONFIG.verbose {
-        println!("IH: {} == {}", lhs_ih.searcher, rhs_ih.searcher);
-      }
+    if let Some(ihs) = self.ih.clone() {
       let mut new_goals = vec![];
-
-      let (rippled_rhs_set, _) = self.get_rippled_exprs(&lhs_ih, &rhs_ih, lhs);
-      let (rippled_lhs_set, _) = self.get_rippled_exprs(&rhs_ih, &lhs_ih, rhs);
-
-      self.egraph.rebuild();
-      self.egraph.analysis.cvec_analysis.saturate();
-
-      if rippled_rhs_set.is_empty() {
+      for (lhs_ih, rhs_ih) in ihs {
         if CONFIG.verbose {
-          println!("Could not ripple RHS");
+          println!("IH: {} == {}", lhs_ih.searcher, rhs_ih.searcher);
         }
-      } else {
-        for rippled_rhs in rippled_rhs_set {
-          if rhs == rippled_rhs {
-            if CONFIG.verbose {
-              println!("Skipping RHS == rippled RHS");
-            }
-            continue;
+
+        let (rippled_rhs_set, _) = self.get_rippled_exprs(&lhs_ih, &rhs_ih, lhs);
+        let (rippled_lhs_set, _) = self.get_rippled_exprs(&rhs_ih, &lhs_ih, rhs);
+
+        self.egraph.rebuild();
+        self.egraph.analysis.cvec_analysis.saturate();
+
+        if rippled_rhs_set.is_empty() {
+          if CONFIG.verbose {
+            println!("Could not ripple RHS");
           }
-          if let Some(true) = cvecs_equal(
-            &self.egraph.analysis.cvec_analysis,
-            &self.egraph[rhs].data.cvec_data,
-            &self.egraph[rippled_rhs].data.cvec_data,
-          ) {
-            if CONFIG.verbose {
-              println!("Rippled RHS:");
-              dump_eclass_exprs(&self.egraph, rippled_rhs);
+        } else {
+          for rippled_rhs in rippled_rhs_set {
+            if rhs == rippled_rhs {
+              if CONFIG.verbose {
+                println!("Skipping RHS == rippled RHS");
+              }
+              continue;
             }
-            let rippled_rhs_exprs = collect_expressions_with_loops(&self.egraph, rippled_rhs);
-            let smallest_rippled_rhs_expr = get_smallest_expr(&rippled_rhs_exprs);
-            let mut new_goal = self.clone();
-            new_goal.name = format!(
-              "rippled_rhs_{}={}",
-              smallest_rippled_rhs_expr, new_goal.eq.rhs.expr
-            );
-            new_goal.full_expr =
-              Equation::from_exprs(&smallest_rippled_rhs_expr, &new_goal.eq.rhs.expr);
-            // new_goal.eq.lhs.sexp = symbolic_expressions::parser::parse_str(
-            //   smallest_rippled_rhs_expr.to_string().as_str(),
-            // )
-            // .unwrap();
-            new_goal.eq.lhs.expr = smallest_rippled_rhs_expr;
-            new_goal.eq.lhs.id = rippled_rhs;
-            // new_goal.ih = Some((rhs_ih.clone(), rhs_ih.clone()));
-            if CONFIG.verbose {
-              println!("New goal:");
-              dump_eclass_exprs(&new_goal.egraph, new_goal.eq.lhs.id);
-              println!("=?=");
-              dump_eclass_exprs(&new_goal.egraph, new_goal.eq.rhs.id);
+            if let Some(true) = cvecs_equal(
+              &self.egraph.analysis.cvec_analysis,
+              &self.egraph[rhs].data.cvec_data,
+              &self.egraph[rippled_rhs].data.cvec_data,
+            ) {
+              if CONFIG.verbose {
+                println!("Rippled RHS:");
+                dump_eclass_exprs(&self.egraph, rippled_rhs);
+              }
+              let rippled_rhs_exprs = collect_expressions_with_loops(&self.egraph, rippled_rhs);
+              let smallest_rippled_rhs_expr = get_smallest_expr(&rippled_rhs_exprs);
+              let mut new_goal = self.clone();
+              new_goal.name = format!(
+                "rippled_rhs_{}={}",
+                smallest_rippled_rhs_expr, new_goal.eq.rhs.expr
+              );
+              new_goal.full_expr =
+                Equation::from_exprs(&smallest_rippled_rhs_expr, &new_goal.eq.rhs.expr);
+              // new_goal.eq.lhs.sexp = symbolic_expressions::parser::parse_str(
+              //   smallest_rippled_rhs_expr.to_string().as_str(),
+              // )
+              // .unwrap();
+              new_goal.eq.lhs.expr = smallest_rippled_rhs_expr;
+              new_goal.eq.lhs.id = rippled_rhs;
+              // new_goal.ih = Some((rhs_ih.clone(), rhs_ih.clone()));
+              if CONFIG.verbose {
+                println!("New goal:");
+                dump_eclass_exprs(&new_goal.egraph, new_goal.eq.lhs.id);
+                println!("=?=");
+                dump_eclass_exprs(&new_goal.egraph, new_goal.eq.rhs.id);
+              }
+              new_goals.push(new_goal);
             }
-            new_goals.push(new_goal);
+          }
+        }
+
+        if rippled_lhs_set.is_empty() {
+          if CONFIG.verbose {
+            println!("Could not ripple LHS");
+          }
+        } else {
+          for rippled_lhs in rippled_lhs_set {
+            if lhs == rippled_lhs {
+              if CONFIG.verbose {
+                println!("Skipping LHS == rippled LHS");
+              }
+              continue;
+            }
+            if let Some(true) = cvecs_equal(
+              &self.egraph.analysis.cvec_analysis,
+              &self.egraph[lhs].data.cvec_data,
+              &self.egraph[rippled_lhs].data.cvec_data,
+            ) {
+              if CONFIG.verbose {
+                println!("Rippled LHS:");
+                dump_eclass_exprs(&self.egraph, rippled_lhs);
+              }
+              let rippled_lhs_exprs = collect_expressions_with_loops(&self.egraph, rippled_lhs);
+              let smallest_rippled_lhs_expr = get_smallest_expr(&rippled_lhs_exprs);
+              let mut new_goal = self.clone();
+              new_goal.name = format!(
+                "rippled_lhs_{}={}",
+                new_goal.eq.lhs.expr, smallest_rippled_lhs_expr
+              );
+              new_goal.full_expr =
+                Equation::from_exprs(&new_goal.eq.lhs.expr, &smallest_rippled_lhs_expr);
+              // new_goal.eq.lhs.sexp = symbolic_expressions::parser::parse_str(
+              //   smallest_rippled_lhs_expr.to_string().as_str(),
+              // )
+              // .unwrap();
+              new_goal.eq.rhs.expr = smallest_rippled_lhs_expr;
+              new_goal.eq.rhs.id = rippled_lhs;
+              // new_goal.ih = Some((lhs_ih.clone(), lhs_ih.clone()));
+              if CONFIG.verbose {
+                println!("New goal:");
+                dump_eclass_exprs(&new_goal.egraph, new_goal.eq.lhs.id);
+                println!("=?=");
+                dump_eclass_exprs(&new_goal.egraph, new_goal.eq.rhs.id);
+              }
+              new_goals.push(new_goal);
+            }
           }
         }
       }
-
-      if rippled_lhs_set.is_empty() {
-        if CONFIG.verbose {
-          println!("Could not ripple LHS");
-        }
-      } else {
-        for rippled_lhs in rippled_lhs_set {
-          if lhs == rippled_lhs {
-            if CONFIG.verbose {
-              println!("Skipping LHS == rippled LHS");
-            }
-            continue;
-          }
-          if let Some(true) = cvecs_equal(
-            &self.egraph.analysis.cvec_analysis,
-            &self.egraph[lhs].data.cvec_data,
-            &self.egraph[rippled_lhs].data.cvec_data,
-          ) {
-            if CONFIG.verbose {
-              println!("Rippled LHS:");
-              dump_eclass_exprs(&self.egraph, rippled_lhs);
-            }
-            let rippled_lhs_exprs = collect_expressions_with_loops(&self.egraph, rippled_lhs);
-            let smallest_rippled_lhs_expr = get_smallest_expr(&rippled_lhs_exprs);
-            let mut new_goal = self.clone();
-            new_goal.name = format!(
-              "rippled_lhs_{}={}",
-              new_goal.eq.lhs.expr, smallest_rippled_lhs_expr
-            );
-            new_goal.full_expr =
-              Equation::from_exprs(&new_goal.eq.lhs.expr, &smallest_rippled_lhs_expr);
-            // new_goal.eq.lhs.sexp = symbolic_expressions::parser::parse_str(
-            //   smallest_rippled_lhs_expr.to_string().as_str(),
-            // )
-            // .unwrap();
-            new_goal.eq.rhs.expr = smallest_rippled_lhs_expr;
-            new_goal.eq.rhs.id = rippled_lhs;
-            // new_goal.ih = Some((lhs_ih.clone(), lhs_ih.clone()));
-            if CONFIG.verbose {
-              println!("New goal:");
-              dump_eclass_exprs(&new_goal.egraph, new_goal.eq.lhs.id);
-              println!("=?=");
-              dump_eclass_exprs(&new_goal.egraph, new_goal.eq.rhs.id);
-            }
-            new_goals.push(new_goal);
-          }
-        }
-      }
-
       Some(new_goals)
     } else {
       if CONFIG.verbose {
@@ -3547,12 +3565,6 @@ impl<'a> LemmaProofState<'a> {
     //   println!("IH LHS: {}", temp_ih.0.searcher);
     //   println!("IH RHS: {}", temp_ih.1.searcher);
     // goal._print_lhs_rhs();
-    if CONFIG.verbose {
-      println!(
-        "Saturate using lemmas: {:#?}",
-        lemmas_state.lemma_rewrites.keys()
-      );
-    }
     goal.saturate(&lemmas_state.lemma_rewrites);
 
     if CONFIG.save_graphs {
@@ -3620,13 +3632,6 @@ impl<'a> LemmaProofState<'a> {
     };
 
     let mut related_lemmas = Vec::new();
-    if CONFIG.generalization {
-      let lemma_indices = lemmas_state.add_lemmas(
-        goal.find_generalized_goals(&blocking_exprs),
-        self.proof_depth + 1,
-      );
-      related_lemmas.extend(lemma_indices);
-    }
     // This ends up being really slow so we'll just take the lemma duplication for now
     // It's unclear that it lets us prove that much more anyway.
     // state.add_cyclic_lemmas(&goal);
@@ -3744,6 +3749,14 @@ impl<'a> LemmaProofState<'a> {
           related_lemmas.extend(lemma_indices);
         }
       }
+    }
+
+    if CONFIG.generalization {
+      let lemma_indices = lemmas_state.add_lemmas(
+        goal.find_generalized_goals(&blocking_exprs),
+        self.proof_depth + 1,
+      );
+      related_lemmas.extend(lemma_indices);
     }
 
     if (!CONFIG.ripple_mode && CONFIG.cc_lemmas)
@@ -4321,7 +4334,9 @@ impl BreadthFirstScheduler for GoalLevelPriorityQueue {
         self
           .goal_graph
           .record_node_status(&goal, GraphProveStatus::Valid);
-        self.progress_set.insert(goal.lemma_id);
+        if !self.goal_graph.is_lemma_proved(goal.lemma_id) {
+          self.progress_set.insert(goal.lemma_id);
+        }
         if self.goal_graph.is_lemma_proved(goal.lemma_id)
           && !directly_improved_lemmas.contains(&goal.lemma_id)
         {

@@ -1,5 +1,5 @@
-# DIR="benchmarks/cclemma/optimization/*"
-DIR="benchmarks/cclemma/optimization-simple/*"
+DIR="benchmarks/cclemma/optimization/*"
+# DIR="benchmarks/cclemma/optimization-simple/*"
 # DIR="benchmarks/cclemma/clam/cases/*"
 # DIR="benchmarks/cclemma/isaplanner/cases/*"
 TIME_LIMIT=180
@@ -12,7 +12,8 @@ cargo clean
 for file in $DIR; do
   echo $file
   # timeout $TIME_LIMIT cargo run --release -- "$file"
-  timeout $TIME_LIMIT cargo run --release -- --ripple --fallback "$file"
+  timeout $TIME_LIMIT cargo run --release -- --ripple "$file"
+  # timeout $TIME_LIMIT cargo run --release -- --ripple --fallback "$file"
   # timeout $TIME_LIMIT cargo run --release -- --ripple -p --no-proof-comments "$file"
   # timeout $TIME_LIMIT cargo run --release -- --ripple --no-destructive-rewrites "$file"
   # timeout $TIME_LIMIT cargo run --release -- --ripple --timeout 20 "$file"

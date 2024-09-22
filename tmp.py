@@ -1,25 +1,19 @@
 import os
 
-directory = 'benchmarks/cclemma/optimization-simple'
+def modify_files(directory):
+  for filename in os.listdir(directory):
+    if filename.endswith(".simple.ceg"):
+      filepath = os.path.join(directory, filename)
+      with open(filepath, "r+") as file:
+        lines = file.readlines()
+        file.seek(0)
+        for line in lines:
+          if line.startswith("  (=== "):
+            modified_line = line.replace("-", "_")
+            file.write(modified_line)
+          else:
+            file.write(line)
+        file.truncate()
 
-files = os.listdir(directory)
-
-for file_name in files:
-  if file_name.endswith('.simple.ceg'):
-    name = file_name.split('.')[0]
-
-    file_path = os.path.join(directory, file_name)
-    with open(file_path, 'r+') as file:
-      lines = file.readlines()
-
-      for i, line in enumerate(lines):
-        if line.strip().startswith('(=== optimize'):
-            lines[i] = '  (=== ' + name + line.strip()[13:] + '\n'
-
-      file.seek(0)
-
-      file.writelines(lines)
-
-      file.truncate()
-
-    print(f"Modified line in {file_name}")
+directory_path = "benchmarks/cclemma/optimization-simple" 
+modify_files(directory_path)
