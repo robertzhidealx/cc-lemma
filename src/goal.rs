@@ -387,7 +387,8 @@ fn find_generalizations_prop(
       let generalized_var = Sexp::String(fresh_name.clone());
       let new_lhs_sexps = substitute_sexp_subsets(&prop.eq.lhs, subexpr, &generalized_var);
       let new_rhs_sexps = substitute_sexp_subsets(&prop.eq.rhs, subexpr, &generalized_var);
-      for (new_lhs, new_rhs) in new_lhs_sexps.into_iter().zip(new_rhs_sexps) {
+      // TODO: Narrow down
+      for (new_lhs, new_rhs) in new_lhs_sexps.into_iter().cartesian_product(new_rhs_sexps) {
         // FIXME: hacky way to find variables
         let lhs_vars = sexp_leaves(&new_lhs);
         let rhs_vars = sexp_leaves(&new_rhs);
@@ -812,7 +813,7 @@ impl<'a> Goal<'a> {
       if self.egraph.lookup_expr(&self.eq.lhs.expr).is_none()
         || self.egraph.lookup_expr(&self.eq.rhs.expr).is_none()
       {
-        // println!("goal: {}", self.name);
+        println!("goal: {}", self.name);
         panic!(
           "One of {} or {} was removed from the e-graph! We can't emit a proof",
           self.eq.lhs.expr, self.eq.rhs.expr
@@ -1123,6 +1124,7 @@ impl<'a> Goal<'a> {
     let has_lemma_rw = lemma_rw.lhs_to_rhs.is_some() || lemma_rw.rhs_to_lhs.is_some();
     if !has_lemma_rw {
       warn!("cannot create a lemma from {} and {}", lhs, rhs);
+      println!("cannot create a lemma from {} and {}", lhs, rhs);
       (None, None)
     } else {
       (
@@ -1373,13 +1375,14 @@ impl<'a> Goal<'a> {
       let mut ihs = vec![];
       let lhs = self.egraph.find(self.eq.lhs.id);
       let rhs = self.egraph.find(self.eq.rhs.id);
+      // TODO: use no-loops version?
       let lhs_exprs = collect_expressions_with_loops(&self.egraph, lhs);
       // let smallest_lhs_expr = get_smallest_expr(&lhs_exprs);
       let rhs_exprs = collect_expressions_with_loops(&self.egraph, rhs);
       // let smallest_rhs_expr = get_smallest_expr(&rhs_exprs);
-      // In the non-cyclic case, only use the original LHS and RHS
-      // and only if no other lemmas have been added yet
-      for (lhs_expr, rhs_expr) in lhs_exprs.iter().zip(&rhs_exprs) {
+      for (lhs_expr, rhs_expr) in lhs_exprs.iter().cartesian_product(&rhs_exprs) {
+        // In the non-cyclic case, only use the original LHS and RHS
+        // and only if no other lemmas have been added yet
         let (lemma_rw, ih_searchers) = self.make_lemma_rewrite(
           // &self.eq.lhs.expr,
           lhs_expr,
@@ -1389,22 +1392,23 @@ impl<'a> Goal<'a> {
           ih_lemma_number,
           false,
         );
-        if lemma_rw.is_none() {
-          println!(
-            "{}: {} == {}. params: {:?}",
-            self.name, self.eq.lhs.sexp, self.eq.rhs.sexp, self.top_level_params
-          );
-          panic!()
-        }
+        // if lemma_rw.is_none() {
+        //   println!(
+        //     "{}: {} == {}. params: {:?}",
+        //     self.name, self.eq.lhs.sexp, self.eq.rhs.sexp, self.top_level_params
+        //   );
+        //   panic!()
+        // }
+        if lemma_rw.is_some() {
+          if let Some((lhs_ih, rhs_ih)) = &ih_searchers {
+            ihs.push((lhs_ih.clone(), rhs_ih.clone()));
+          }
 
-        if let Some((lhs_ih, rhs_ih)) = &ih_searchers {
-          ihs.push((lhs_ih.clone(), rhs_ih.clone()));
+          let lemma_rw = lemma_rw.unwrap();
+          lemma_rw.add_to_rewrites(&mut rewrites);
         }
-
-        let lemma_rw = lemma_rw.unwrap();
-        lemma_rw.add_to_rewrites(&mut rewrites);
       }
-      if self.ih.is_none() {
+      if self.ih.is_none() && !ihs.is_empty() {
         if CONFIG.verbose {
           println!(
             "No IHs found, create them:\n{}",
@@ -1762,6 +1766,7 @@ impl<'a> Goal<'a> {
     let mut blocking_exprs: BTreeSet<Id> = BTreeSet::default();
 
     let mut lhs_descendents = BTreeSet::default();
+    // TODO: Canonicalize?
     self.compute_descendents(self.eq.lhs.id, &mut lhs_descendents);
 
     let mut rhs_descendents = BTreeSet::default();
@@ -1845,10 +1850,22 @@ impl<'a> Goal<'a> {
 
   /// Gets the next variable to case split on using the blocking var analysis
   fn next_scrutinee(&mut self, mut blocking_vars: BTreeSet<Symbol>) -> Option<Scrutinee> {
-    let blocking = self
-      .scrutinees
-      .iter()
-      .find_position(|s| blocking_vars.contains(&s.name));
+    let is_goal_var = match (
+      &self.egraph[self.eq.lhs.id].data.canonical_form_data,
+      &self.egraph[self.eq.rhs.id].data.canonical_form_data,
+    ) {
+      (CanonicalForm::Var(_), CanonicalForm::Const(_))
+      | (CanonicalForm::Const(_), CanonicalForm::Var(_)) => true,
+      _ => false,
+    };
+    let blocking = if is_goal_var {
+      self.scrutinees.iter().next().map(|s| (0, s))
+    } else {
+      self
+        .scrutinees
+        .iter()
+        .find_position(|s| blocking_vars.contains(&s.name))
+    };
 
     // Add the vars we already have case split on, since those were previously
     // blocking. This is important for our soundness check, since we skip
@@ -2495,12 +2512,6 @@ impl<'a> Goal<'a> {
       return Err(new_goals);
     }
     for (au_lhs, au_rhs) in &aus {
-      if au_lhs == au_rhs {
-        if CONFIG.verbose {
-          println!("Skipping au_lhs == au_rhs");
-        }
-        continue;
-      }
       if let Some(true) = cvecs_equal(
         &self.egraph.analysis.cvec_analysis,
         &self.egraph[*au_lhs].data.cvec_data,
@@ -2512,11 +2523,7 @@ impl<'a> Goal<'a> {
           println!("=?=");
           dump_eclass_exprs(&self.egraph, *au_rhs);
         }
-        // TODO: Canonicalize?
-        let exprs = get_all_expressions_with_loop(
-          &self.egraph,
-          vec![self.egraph.find(*au_lhs), self.egraph.find(*au_rhs)],
-        );
+        let exprs = get_all_expressions(&self.egraph, vec![*au_lhs, *au_rhs]);
         let smallest_au_lhs_expr = get_smallest_expr(&exprs[&au_lhs]);
         let smallest_au_rhs_expr = get_smallest_expr(&exprs[&au_rhs]);
         let mut new_goal = self.clone();
@@ -2546,18 +2553,18 @@ impl<'a> Goal<'a> {
     if CONFIG.verbose {
       println!("*** syntactic_decomp ***");
     }
-    if new_goals.len() != aus.len() {
-      Err(new_goals)
-    } else {
+    if new_goals.len() == aus.len() {
       Ok(new_goals)
+    } else {
+      Err(new_goals)
     }
   }
 
   pub fn au_eclass(
     &self,
-    cache: &mut BTreeMap<(Id, Id), BTreeSet<AU<Symbol, (Id, Id)>>>,
+    cache: &mut BTreeMap<(Id, Id), BTreeSet<AU<Symbol>>>,
     state @ (c1, c2): (Id, Id),
-  ) -> BTreeSet<AU<Symbol, (Id, Id)>> {
+  ) -> BTreeSet<AU<Symbol>> {
     if cache.contains_key(&state) {
       return cache[&state].clone();
     }
@@ -2581,11 +2588,11 @@ impl<'a> Goal<'a> {
 
   fn au_enode(
     &self,
-    cache: &mut BTreeMap<(Id, Id), BTreeSet<AU<Symbol, (Id, Id)>>>,
+    cache: &mut BTreeMap<(Id, Id), BTreeSet<AU<Symbol>>>,
     state: (Id, Id),
     n1: &SymbolLang,
     n2: &SymbolLang,
-  ) -> BTreeSet<AU<Symbol, (Id, Id)>> {
+  ) -> BTreeSet<AU<Symbol>> {
     let mut aus = BTreeSet::new();
 
     if n1.op != n2.op || n1.children.len() != n2.children.len() {
@@ -2640,11 +2647,7 @@ impl<'a> Goal<'a> {
       }
 
       // get_all_expressions_with_loop fails to extract more often
-      // TODO: Canonicalize?
-      let exprs = get_all_expressions_with_loop(
-        &self.egraph,
-        vec![self.egraph.find(lhs_desc), self.egraph.find(rhs_desc)],
-      );
+      let exprs = get_all_expressions(&self.egraph, vec![lhs_desc, rhs_desc]);
       // println!(
       //   "exprs: {:#?}",
       //   exprs
@@ -3602,6 +3605,20 @@ impl<'a> LemmaProofState<'a> {
     // let goal_egraph_saturated = goal.saturate(&lemmas_state.lemma_rewrites);
     goal.egraph = goal.saturate(&lemmas_state.lemma_rewrites);
 
+    // goal.egraph.analysis.cvec_analysis.saturate();
+    // if let Some(true) = cvecs_equal(
+    //   &goal.egraph.analysis.cvec_analysis,
+    //   &goal.egraph[goal.egraph.find(goal.eq.lhs.id)].data.cvec_data,
+    //   &goal.egraph[goal.egraph.find(goal.eq.lhs.id)].data.cvec_data,
+    // ) {
+    // } else {
+    //   if CONFIG.verbose {
+    //     println!("Cvecs disagree");
+    //   }
+    //   self.outcome = Some(Outcome::Invalid);
+    //   return None;
+    // }
+
     if CONFIG.save_graphs {
       goal.save_egraph();
     }
@@ -3646,28 +3663,8 @@ impl<'a> LemmaProofState<'a> {
     println!("cost pair {} {}", best_l_cost, best_l_prog);
     println!("cost pair {} {}", best_r_cost, best_r_prog);*/
 
+    // TODO: Probably can be postponed as well
     goal.split_ite();
-
-    if goal.scrutinees.is_empty() {
-      self.outcome = Some(Outcome::Invalid);
-      // if CONFIG.verbose {
-      //   println!("claimed invalid");
-      // }
-      return None;
-    }
-    let (blocking_vars, blocking_exprs) = if !CONFIG.blocking_vars_analysis {
-      warn!("Blocking var analysis is disabled");
-      (
-        goal.scrutinees.iter().map(|s| s.name).collect(),
-        BTreeSet::default(),
-      )
-    } else {
-      let (blocking_vars, blocking_exprs) = goal.find_blocking(timer);
-      if CONFIG.verbose {
-        println!("blocking vars: {:?}", blocking_vars);
-      }
-      (blocking_vars, blocking_exprs)
-    };
 
     let mut related_lemmas = Vec::new();
 
@@ -3676,6 +3673,8 @@ impl<'a> LemmaProofState<'a> {
     // state.add_cyclic_lemmas(&goal);
 
     // goal.debug_search_for_patterns_in_egraph();
+
+    // goal.egraph.rebuild();
 
     let mut ripple_out_success = false;
     if CONFIG.ripple_mode {
@@ -3698,6 +3697,10 @@ impl<'a> LemmaProofState<'a> {
             .into_iter()
             .map(|rw_info| (rw_info.lemma_prop, rw_info.renamed_params))
             .collect::<Vec<_>>();
+          // let new_rewrite_eqs = rewrite_infos
+          //   .into_iter()
+          //   .map(|rw_info| rw_info.lemma_prop)
+          //   .collect::<Vec<_>>();
 
           let fresh_name = format!("fresh_{}_{}", new_goal.name, new_goal.egraph.total_size());
           for (new_rewrite_eq, renamed_params) in &new_rewrite_eqs {
@@ -3709,8 +3712,8 @@ impl<'a> LemmaProofState<'a> {
               fresh_name.clone(),
             ));
           }
-          // println!("ayo lemmas: {:#?}", lemmas);
           let lemma_indices = lemmas_state.add_lemmas(lemmas, self.proof_depth + 1);
+          // let lemma_indices = lemmas_state.add_lemmas(new_rewrite_eqs, self.proof_depth + 1);
           related_lemmas.extend(lemma_indices);
         }
       }
@@ -3721,6 +3724,36 @@ impl<'a> LemmaProofState<'a> {
       match goal.syntactic_decomp() {
         // All anti-unified holes pass cvec analysis, syntactic decomposition succeeds
         Ok(new_goals) => {
+          // let any_goal_is_var = new_goals.iter().any(|new_goal| {
+          //   match (
+          //     &new_goal.egraph[new_goal.eq.lhs.id].data.canonical_form_data,
+          //     &new_goal.egraph[new_goal.eq.rhs.id].data.canonical_form_data,
+          //   ) {
+          //     (CanonicalForm::Var(_), _) | (_, CanonicalForm::Var(_)) => true,
+          //     (_, _) => false,
+          //   }
+          // });
+          // if any_goal_is_var {
+          //   for new_goal in new_goals {
+          //     let (_, rewrite_infos) = new_goal.make_lemma_rewrites_from_all_exprs(
+          //       new_goal.eq.lhs.id,
+          //       new_goal.eq.rhs.id,
+          //       vec![],
+          //       timer,
+          //       lemmas_state,
+          //       false,
+          //       false,
+          //       // TODO: false?
+          //       true,
+          //     );
+          //     let new_rewrite_eqs = rewrite_infos
+          //       .into_iter()
+          //       .map(|rw_info| rw_info.lemma_prop.clone())
+          //       .collect::<Vec<_>>();
+          //     let lemma_indices = lemmas_state.add_lemmas(new_rewrite_eqs, self.proof_depth + 1);
+          //     related_lemmas.extend(lemma_indices);
+          //   }
+          // } else {
           let new_goal_infos = new_goals
             .iter()
             // Treat syntactically decomposed lemmas as if they are case-split goals
@@ -3729,6 +3762,13 @@ impl<'a> LemmaProofState<'a> {
           self.goals.extend(new_goals);
           // Don't bother case splitting when we've simplified the goal via syntactic decomposition
           return Some((related_lemmas, new_goal_infos));
+          // }
+        }
+        // There is at least one lemma from anti-unification that fails cvec analysis, decomposition fails
+        Err(_new_goals) => {
+          if CONFIG.verbose {
+            println!("Could not syntactically decompose");
+          }
           // for new_goal in new_goals {
           //   let (_, rewrite_infos) = new_goal.make_lemma_rewrites_from_all_exprs(
           //     new_goal.eq.lhs.id,
@@ -3747,30 +3787,6 @@ impl<'a> LemmaProofState<'a> {
           //   let lemma_indices = lemmas_state.add_lemmas(new_rewrite_eqs, self.proof_depth + 1);
           //   related_lemmas.extend(lemma_indices);
           // }
-        }
-        // There is at least one lemma from anti-unification that fails cvec analysis, decomposition fails
-        Err(new_goals) => {
-          if CONFIG.verbose {
-            println!("Could not syntactically decompose");
-          }
-          for new_goal in new_goals {
-            let (_rewrites, rewrite_infos) = new_goal.make_lemma_rewrites_from_all_exprs(
-              new_goal.eq.lhs.id,
-              new_goal.eq.rhs.id,
-              vec![],
-              timer,
-              lemmas_state,
-              false,
-              false,
-              false,
-            );
-            let new_rewrite_eqs = rewrite_infos
-              .into_iter()
-              .map(|rw_info| rw_info.lemma_prop.clone())
-              .collect::<Vec<_>>();
-            let lemma_indices = lemmas_state.add_lemmas(new_rewrite_eqs, self.proof_depth + 1);
-            related_lemmas.extend(lemma_indices);
-          }
         }
       }
     }
@@ -3810,6 +3826,27 @@ impl<'a> LemmaProofState<'a> {
       }
     }
 
+    if goal.scrutinees.is_empty() {
+      self.outcome = Some(Outcome::Invalid);
+      // if CONFIG.verbose {
+      //   println!("claimed invalid");
+      // }
+      return None;
+    }
+    let (blocking_vars, blocking_exprs) = if !CONFIG.blocking_vars_analysis {
+      warn!("Blocking var analysis is disabled");
+      (
+        goal.scrutinees.iter().map(|s| s.name).collect(),
+        BTreeSet::default(),
+      )
+    } else {
+      let (blocking_vars, blocking_exprs) = goal.find_blocking(timer);
+      if CONFIG.verbose {
+        println!("blocking vars: {:?}", blocking_vars);
+      }
+      (blocking_vars, blocking_exprs)
+    };
+
     if CONFIG.generalization {
       let lemma_indices = lemmas_state.add_lemmas(
         goal.find_generalized_goals(&blocking_exprs),
@@ -3826,6 +3863,7 @@ impl<'a> LemmaProofState<'a> {
       related_lemmas.extend(lemma_indices);
     }
 
+    // println!("Goal scrutinees: {:?}", goal.scrutinees);
     if let Some(scrutinee) = goal.next_scrutinee(blocking_vars) {
       if CONFIG.verbose {
         println!(
@@ -4284,16 +4322,18 @@ impl BreadthFirstScheduler for GoalLevelPriorityQueue {
           .goal_graph
           .record_node_status(&info, GraphProveStatus::Valid);
         // UNCOMMENT
-        // if !self.goal_graph.is_lemma_proved(info.lemma_id) {
-        self.progress_set.insert(info.lemma_id);
-        // }
+        if !self.goal_graph.is_lemma_proved(info.lemma_id) {
+          self.progress_set.insert(info.lemma_id);
+        }
       } else if let Some(Outcome::StrongFertilization(_)) = lemma_proof_state.outcome {
+        //* Reset lemma outcome to None
+        lemma_proof_state.outcome = None;
         self
           .goal_graph
           .record_node_status(&info, GraphProveStatus::Valid);
-        self.progress_set.insert(info.lemma_id);
-        //* Reset lemma outcome to None
-        lemma_proof_state.outcome = None;
+        if !self.goal_graph.is_lemma_proved(info.lemma_id) {
+          self.progress_set.insert(info.lemma_id);
+        }
       } else if let Some(Outcome::Invalid) = lemma_proof_state.outcome {
         self
           .goal_graph

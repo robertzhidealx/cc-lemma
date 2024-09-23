@@ -830,17 +830,19 @@ pub fn sexp_size(sexp: &Sexp) -> usize {
 }
 
 #[derive(PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Debug)]
-pub enum AU<Op, T> {
+pub enum AU<Op> {
   Node(Op, Vec<Self>),
-  Hole(T),
+  Hole((Id, Id)),
 }
 
-impl<Op: std::cmp::Eq + std::hash::Hash, T: std::cmp::Eq + std::hash::Hash + Ord> AU<Op, T> {
-  pub fn extract_holes(self) -> BTreeSet<T> {
+impl<Op: std::cmp::Eq + std::hash::Hash> AU<Op> {
+  pub fn extract_holes(self) -> BTreeSet<(Id, Id)> {
     match self {
-      Self::Hole(st) => {
+      Self::Hole(st @ (lhs, rhs)) => {
         let mut set = BTreeSet::new();
-        set.insert(st);
+        if lhs != rhs {
+          set.insert(st);
+        }
         set
       }
       Self::Node(_, aus) => aus.into_iter().flat_map(|au| au.extract_holes()).collect(),

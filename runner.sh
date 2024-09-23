@@ -1,9 +1,10 @@
-DIR="benchmarks/cclemma/optimization/*"
-# DIR="benchmarks/cclemma/optimization-simple/*"
+# DIR="benchmarks/cclemma/optimization/*"
+DIR="benchmarks/cclemma/optimization-simple/*"
 # DIR="benchmarks/cclemma/clam/cases/*"
 # DIR="benchmarks/cclemma/isaplanner/cases/*"
-TIME_LIMIT=180
-# TIME_LIMIT=20
+# TIME_LIMIT=180
+# TIME_LIMIT=60
+TIME_LIMIT=20
 export RUSTFLAGS="-Awarnings"
 export RUST_BACKTRACE=1
 
