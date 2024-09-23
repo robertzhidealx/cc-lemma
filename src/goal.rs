@@ -345,15 +345,26 @@ impl Display for ETermEquation {
 fn find_generalizations_prop(
   prop: &Prop,
   global_context: &Context,
+  local_context: &Context,
+  renamed_params: &BTreeMap<String, String>,
   fresh_name: String,
 ) -> Vec<Prop> {
+  // println!("Prop: {}", prop);
   let lhs_nontrivial_subexprs = nontrivial_sexp_subexpressions_containing_vars(&prop.eq.lhs);
   let rhs_nontrivial_subexprs = nontrivial_sexp_subexpressions_containing_vars(&prop.eq.rhs);
   let mut output = vec![];
-  // println!("Trying to generalize {} = {}", raw_eq.eq.lhs, raw_eq.eq.rhs);
+  // println!(
+  //   "lhs_nontrivial_subexprs: {:#?}",
+  //   lhs_nontrivial_subexprs.keys()
+  // );
+  // println!(
+  //   "rhs_nontrivial_subexprs: {:#?}",
+  //   rhs_nontrivial_subexprs.keys()
+  // );
   for (rhs_subexpr_str, subexpr) in &rhs_nontrivial_subexprs {
     // should be the same subexpr so we don't need to bind it
     if lhs_nontrivial_subexprs.get(rhs_subexpr_str).is_some() {
+      // println!("Generalizing: {}", rhs_subexpr_str);
       let op = match subexpr {
         Sexp::Empty => unreachable!(),
         // This shouldn't happen unless we generalize a constant
@@ -364,24 +375,31 @@ fn find_generalizations_prop(
       if op == "$" {
         continue;
       }
-      let op_ty = &global_context[&Symbol::new(op)];
+      // println!("Local context: {:#?}", local_context);
+      // println!("Renamed params: {:#?}", renamed_params);
+      let op_ty = &global_context
+        .get(&Symbol::new(op))
+        .or_else(|| local_context.get(&Symbol::new(&renamed_params[op])))
+        .unwrap();
       // Again, we assume that the expression here is fully applied, i.e. it is not a $
       let (_, ty) = op_ty.args_ret();
       let var_symb = Symbol::new(&fresh_name);
       let generalized_var = Sexp::String(fresh_name.clone());
-      let new_lhs = substitute_sexp(&prop.eq.lhs, subexpr, &generalized_var);
-      let new_rhs = substitute_sexp(&prop.eq.rhs, subexpr, &generalized_var);
-      // FIXME: hacky way to find variables
-      let lhs_vars = sexp_leaves(&new_lhs);
-      let rhs_vars = sexp_leaves(&new_rhs);
-      let mut new_params = prop.params.clone();
-      // Only keep the vars that remain after substituting.
-      new_params.retain(|(var, _ty)| {
-        lhs_vars.contains(&var.to_string()) || rhs_vars.contains(&var.to_string())
-      });
-      new_params.push((var_symb, ty));
-      // println!("Generalization candidate: {} = {}", new_lhs, new_rhs);
-      output.push(Prop::new(Equation::new(new_lhs, new_rhs), new_params));
+      let new_lhs_sexps = substitute_sexp_subsets(&prop.eq.lhs, subexpr, &generalized_var);
+      let new_rhs_sexps = substitute_sexp_subsets(&prop.eq.rhs, subexpr, &generalized_var);
+      for (new_lhs, new_rhs) in new_lhs_sexps.into_iter().zip(new_rhs_sexps) {
+        // FIXME: hacky way to find variables
+        let lhs_vars = sexp_leaves(&new_lhs);
+        let rhs_vars = sexp_leaves(&new_rhs);
+        let mut new_params = prop.params.clone();
+        // Only keep the vars that remain after substituting.
+        new_params.retain(|(var, _ty)| {
+          lhs_vars.contains(&var.to_string()) || rhs_vars.contains(&var.to_string())
+        });
+        new_params.push((var_symb, ty.clone()));
+        // println!("Generalization candidate: {} = {}", new_lhs, new_rhs);
+        output.push(Prop::new(Equation::new(new_lhs, new_rhs), new_params).0);
+      }
     }
   }
   output
@@ -419,6 +437,7 @@ pub struct LemmaRewrite<A> {
   pub rhs_to_lhs: Option<(String, Rewrite<SymbolLang, A>)>,
   pub lemma_number: usize,
   pub lemma_prop: Prop,
+  pub renamed_params: BTreeMap<String, String>,
 }
 
 impl<A: Analysis<SymbolLang> + Clone> LemmaRewrite<A> {
@@ -433,6 +452,7 @@ impl<A: Analysis<SymbolLang> + Clone> LemmaRewrite<A> {
       rhs_to_lhs,
       lemma_number,
       lemma_prop,
+      renamed_params: BTreeMap::new(),
     }
   }
 
@@ -744,7 +764,7 @@ impl<'a> Goal<'a> {
   }
 
   /// Saturate the goal by applying all available rewrites
-  pub fn saturate(&mut self, top_lemmas: &BTreeMap<String, Rw>) {
+  pub fn saturate(&mut self, top_lemmas: &BTreeMap<String, Rw>) -> Eg {
     let mut rewrites = self
       .global_search_state
       .reductions
@@ -771,7 +791,8 @@ impl<'a> Goal<'a> {
         }
       })
       .run(rewrites);
-    self.egraph = runner.egraph;
+    // self.egraph = runner.egraph;
+    runner.egraph
   }
 
   /// Look to see if we have proven the goal somehow. Note that this does not
@@ -791,6 +812,7 @@ impl<'a> Goal<'a> {
       if self.egraph.lookup_expr(&self.eq.lhs.expr).is_none()
         || self.egraph.lookup_expr(&self.eq.rhs.expr).is_none()
       {
+        // println!("goal: {}", self.name);
         panic!(
           "One of {} or {} was removed from the e-graph! We can't emit a proof",
           self.eq.lhs.expr, self.eq.rhs.expr
@@ -809,6 +831,9 @@ impl<'a> Goal<'a> {
     if CONFIG.ripple_mode {
       if let Some(ihs) = &self.ih {
         for (lhs_ih, rhs_ih) in ihs {
+          if CONFIG.verbose {
+            println!("IH: {} == {}", lhs_ih.searcher, rhs_ih.searcher);
+          }
           if let Some(lhs_matches) = lhs_ih.search_eclass(&self.egraph, resolved_lhs_id) {
             if let Some(rhs_matches) = rhs_ih.search_eclass(&self.egraph, resolved_rhs_id) {
               for (lhs_subst, rhs_subst) in lhs_matches
@@ -1059,11 +1084,13 @@ impl<'a> Goal<'a> {
 
     let rewrite_eq = Equation::from_exprs(lhs_expr, rhs_expr);
     // println!("make lemma {} {}", rewrite_eq, params.iter().map(|(name, ty)| format!("{}[{}]", name, ty)).join(" "));
+    let (lemma_prop, renamed_params) = Prop::new(rewrite_eq, params.clone());
     let mut lemma_rw = LemmaRewrite {
       lhs_to_rhs: None,
       rhs_to_lhs: None,
       lemma_number,
-      lemma_prop: Prop::new(rewrite_eq, params.clone()),
+      lemma_prop,
+      renamed_params,
     };
     let lemma_name = lemma_rw.lemma_name();
     if rhs_vars.is_subset(&lhs_vars) {
@@ -1186,11 +1213,13 @@ impl<'a> Goal<'a> {
 
     let rewrite_eq = Equation::from_exprs(lhs_expr, rhs_expr);
     // println!("make lemma {} {}", rewrite_eq, params.iter().map(|(name, ty)| format!("{}[{}]", name, ty)).join(" "));
+    let (lemma_prop, renamed_params) = Prop::new(rewrite_eq, params.clone());
     let mut lemma_rw = LemmaRewrite {
       lhs_to_rhs: None,
       rhs_to_lhs: None,
       lemma_number,
-      lemma_prop: Prop::new(rewrite_eq, params.clone()),
+      lemma_prop,
+      renamed_params,
     };
     let lemma_name = lemma_rw.lemma_name();
     if rhs_vars.is_subset(&lhs_vars) {
@@ -1280,11 +1309,13 @@ impl<'a> Goal<'a> {
       .collect();
 
     let rewrite_eq = Equation::from_exprs(lhs_expr, rhs_expr);
+    let (lemma_prop, renamed_params) = Prop::new(rewrite_eq, params.clone());
     let mut lemma_rw = LemmaRewrite {
       lhs_to_rhs: None,
       rhs_to_lhs: None,
       lemma_number,
-      lemma_prop: Prop::new(rewrite_eq, params.clone()),
+      lemma_prop,
+      renamed_params,
     };
     let lemma_name = lemma_rw.lemma_name();
     if rhs_vars.is_subset(&lhs_vars) {
@@ -2064,10 +2095,10 @@ impl<'a> Goal<'a> {
             true,
           );
           // println!("made rewrites");
-          let new_rewrite_eqs: Vec<Prop> = rewrite_infos
+          let new_rewrite_eqs = rewrite_infos
             .into_iter()
-            .map(|rw_info| rw_info.lemma_prop)
-            .collect();
+            .map(|rw_info| (rw_info.lemma_prop, rw_info.renamed_params))
+            .collect::<Vec<_>>();
           // We used to check the egraph to see if the lemma helped us, but now
           // we just throw it into our list. We do that check in try_prove_lemmas.
           if new_rewrite_eqs.is_empty() {
@@ -2076,13 +2107,15 @@ impl<'a> Goal<'a> {
 
           if CONFIG.cc_lemmas_generalization {
             let fresh_name = format!("fresh_{}_{}", self.name, self.egraph.total_size());
-            for new_rewrite_eq in new_rewrite_eqs.iter() {
+            for (new_rewrite_eq, renamed_params) in &new_rewrite_eqs {
               if timer.timeout() {
                 return lemmas;
               }
               lemmas.extend(find_generalizations_prop(
                 new_rewrite_eq,
                 self.global_search_state.context,
+                &self.local_context,
+                renamed_params,
                 fresh_name.clone(),
               ));
             }
@@ -2096,7 +2129,7 @@ impl<'a> Goal<'a> {
             && !(class_1_id == resolved_lhs_id && class_2_id == resolved_rhs_id
               || class_1_id == resolved_rhs_id && class_2_id == resolved_lhs_id)
           {
-            lemmas.extend(new_rewrite_eqs);
+            lemmas.extend::<Vec<_>>(new_rewrite_eqs.into_iter().unzip::<_, _, _, Vec<_>>().0);
           }
         }
       }
@@ -3117,7 +3150,7 @@ impl<'a> Goal<'a> {
       return None;
     }
 
-    let prop = Prop::new(eq.clone(), params.clone());
+    let prop = Prop::new(eq.clone(), params.clone()).0;
     let mut new_goal = Goal::top(
       &format!("{}_gen", self.name),
       &prop,
@@ -3126,7 +3159,7 @@ impl<'a> Goal<'a> {
     );
     if new_goal.cvecs_valid() == Some(true) {
       // println!("generalizing {} === {}", lhs_expr, rhs_expr);
-      Some((Prop::new(eq, params), new_goal))
+      Some((Prop::new(eq, params).0, new_goal))
     } else {
       // println!("cvecs disagree for {} === {}", lhs_expr, rhs_expr);
       None
@@ -3565,11 +3598,14 @@ impl<'a> LemmaProofState<'a> {
     //   println!("IH LHS: {}", temp_ih.0.searcher);
     //   println!("IH RHS: {}", temp_ih.1.searcher);
     // goal._print_lhs_rhs();
-    goal.saturate(&lemmas_state.lemma_rewrites);
+    // let goal_egraph_snapshot = goal.egraph.clone();
+    // let goal_egraph_saturated = goal.saturate(&lemmas_state.lemma_rewrites);
+    goal.egraph = goal.saturate(&lemmas_state.lemma_rewrites);
 
     if CONFIG.save_graphs {
       goal.save_egraph();
     }
+    // for _ in 0..2 {
     if let Some(proof_leaf) = goal.find_proof() {
       match proof_leaf {
         ProofLeaf::Todo => {
@@ -3596,6 +3632,8 @@ impl<'a> LemmaProofState<'a> {
         }
       }
     }
+    // goal.egraph = goal_egraph_saturated.clone();
+    // }
     if CONFIG.verbose {
       explain_goal_failure(goal);
     }
@@ -3632,6 +3670,7 @@ impl<'a> LemmaProofState<'a> {
     };
 
     let mut related_lemmas = Vec::new();
+
     // This ends up being really slow so we'll just take the lemma duplication for now
     // It's unclear that it lets us prove that much more anyway.
     // state.add_cyclic_lemmas(&goal);
@@ -3640,10 +3679,12 @@ impl<'a> LemmaProofState<'a> {
 
     let mut ripple_out_success = false;
     if CONFIG.ripple_mode {
+      // goal.egraph = goal_egraph_snapshot;
       if let Some(new_goals) = goal.ripple_out() {
         ripple_out_success = true;
         for new_goal in new_goals {
-          let (_rewrites, rewrite_infos) = new_goal.make_lemma_rewrites_from_all_exprs(
+          let mut lemmas = vec![];
+          let (_, rewrite_infos) = new_goal.make_lemma_rewrites_from_all_exprs(
             new_goal.eq.lhs.id,
             new_goal.eq.rhs.id,
             vec![],
@@ -3655,25 +3696,25 @@ impl<'a> LemmaProofState<'a> {
           );
           let new_rewrite_eqs = rewrite_infos
             .into_iter()
-            .map(|rw_info| rw_info.lemma_prop.clone())
+            .map(|rw_info| (rw_info.lemma_prop, rw_info.renamed_params))
             .collect::<Vec<_>>();
-          // let mut possible_lemmas = vec![];
-          // let fresh_name = format!("fresh_{}_{}", new_goal.name, new_goal.egraph.total_size());
-          // for prop in &new_rewrite_eqs {
-          //   possible_lemmas.extend(find_generalizations_prop(
-          //     prop,
-          //     new_goal.global_search_state.context,
-          //     fresh_name.clone(),
-          //   ));
-          // }
-          // let lemma_indices = lemmas_state.add_lemmas(possible_lemmas, self.proof_depth + 1);
-          let lemma_indices = lemmas_state.add_lemmas(new_rewrite_eqs, self.proof_depth + 1);
-          // .into_iter()
-          // .map(|(lemma_id, prop, _)| (lemma_id, prop, true))
-          // .collect::<Vec<_>>();
+
+          let fresh_name = format!("fresh_{}_{}", new_goal.name, new_goal.egraph.total_size());
+          for (new_rewrite_eq, renamed_params) in &new_rewrite_eqs {
+            lemmas.extend(find_generalizations_prop(
+              new_rewrite_eq,
+              new_goal.global_search_state.context,
+              &new_goal.local_context,
+              renamed_params,
+              fresh_name.clone(),
+            ));
+          }
+          // println!("ayo lemmas: {:#?}", lemmas);
+          let lemma_indices = lemmas_state.add_lemmas(lemmas, self.proof_depth + 1);
           related_lemmas.extend(lemma_indices);
         }
       }
+      // goal.egraph = goal_egraph_saturated;
     }
 
     if CONFIG.ripple_mode {
@@ -3688,14 +3729,8 @@ impl<'a> LemmaProofState<'a> {
           self.goals.extend(new_goals);
           // Don't bother case splitting when we've simplified the goal via syntactic decomposition
           return Some((related_lemmas, new_goal_infos));
-        }
-        // There is at least one lemma from anti-unification that fails cvec analysis, decomposition fails
-        Err(_new_goals) => {
-          if CONFIG.verbose {
-            println!("Could not syntactically decompose");
-          }
           // for new_goal in new_goals {
-          //   let (_rewrites, rewrite_infos) = new_goal.make_lemma_rewrites_from_all_exprs(
+          //   let (_, rewrite_infos) = new_goal.make_lemma_rewrites_from_all_exprs(
           //     new_goal.eq.lhs.id,
           //     new_goal.eq.rhs.id,
           //     vec![],
@@ -3712,6 +3747,30 @@ impl<'a> LemmaProofState<'a> {
           //   let lemma_indices = lemmas_state.add_lemmas(new_rewrite_eqs, self.proof_depth + 1);
           //   related_lemmas.extend(lemma_indices);
           // }
+        }
+        // There is at least one lemma from anti-unification that fails cvec analysis, decomposition fails
+        Err(new_goals) => {
+          if CONFIG.verbose {
+            println!("Could not syntactically decompose");
+          }
+          for new_goal in new_goals {
+            let (_rewrites, rewrite_infos) = new_goal.make_lemma_rewrites_from_all_exprs(
+              new_goal.eq.lhs.id,
+              new_goal.eq.rhs.id,
+              vec![],
+              timer,
+              lemmas_state,
+              false,
+              false,
+              false,
+            );
+            let new_rewrite_eqs = rewrite_infos
+              .into_iter()
+              .map(|rw_info| rw_info.lemma_prop.clone())
+              .collect::<Vec<_>>();
+            let lemma_indices = lemmas_state.add_lemmas(new_rewrite_eqs, self.proof_depth + 1);
+            related_lemmas.extend(lemma_indices);
+          }
         }
       }
     }
@@ -3809,7 +3868,7 @@ impl<'a> LemmaProofState<'a> {
   pub fn try_finish(&mut self, info: &GoalInfo, lemmas_state: &mut LemmasState) -> bool {
     let pos = self.get_info_index(info);
     let goal = self.goals.get_mut(pos).unwrap();
-    goal.saturate(&lemmas_state.lemma_rewrites);
+    goal.egraph = goal.saturate(&lemmas_state.lemma_rewrites);
     if let Some(leaf) = goal.find_proof() {
       let name = goal.name.clone();
       // UNCOMMENT
@@ -3865,8 +3924,12 @@ impl<'a> ProofState<'a> {
           .insert(lemma_proof_state.prop.clone());
         if let Some(rw) = lemma_proof_state.rw.as_ref() {
           if CONFIG.verbose {
-            println!("Adding rewrite rule: {}", rw.lhs_to_rhs.as_ref().unwrap().0);
-            println!("Adding rewrite rule: {}", rw.rhs_to_lhs.as_ref().unwrap().0);
+            if let Some(rw) = rw.lhs_to_rhs.as_ref() {
+              println!("Adding rewrite rule: {}", rw.0);
+            }
+            if let Some(rw) = rw.rhs_to_lhs.as_ref() {
+              println!("Adding rewrite rule: {}", rw.0);
+            }
           }
           rw.add_to_rewrites(&mut lemmas_state.lemma_rewrites)
         }

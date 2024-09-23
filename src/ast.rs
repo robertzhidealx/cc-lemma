@@ -218,6 +218,33 @@ where
   })
 }
 
+pub fn map_sexp_sexp_halt<F>(f: F, sexp: &Sexp) -> (Sexp, bool)
+where
+  F: Copy + Fn(&Sexp) -> Option<Sexp>,
+{
+  match f(sexp) {
+    Some(new_sexp) => (new_sexp, true),
+    None => match sexp {
+      Sexp::List(list) => {
+        let mut new_list = vec![];
+        let mut halt = false;
+        for s in list {
+          let new_s = if !halt {
+            let (new_s, new_halt) = map_sexp_sexp_halt(f, s);
+            halt = new_halt;
+            new_s
+          } else {
+            s.clone()
+          };
+          new_list.push(new_s);
+        }
+        (Sexp::List(new_list), halt)
+      }
+      _ => (sexp.clone(), false),
+    },
+  }
+}
+
 /// Iterates over every sub-sexp in the sexp, substituting it entirely if it
 /// matches the substitution.
 pub fn substitute_sexp(sexp: &Sexp, from: &Sexp, to: &Sexp) -> Sexp {
@@ -231,6 +258,35 @@ pub fn substitute_sexp(sexp: &Sexp, from: &Sexp, to: &Sexp) -> Sexp {
     },
     sexp,
   )
+}
+
+pub fn substitute_sexp_subsets(sexp: &Sexp, from: &Sexp, to: &Sexp) -> Vec<Sexp> {
+  let mut prev_sexp = sexp.clone();
+  let mut sexps = vec![];
+  // let mut loop_count = 0;
+  loop {
+    let (new_sexp, _) = map_sexp_sexp_halt(
+      |interior_sexp| {
+        if interior_sexp == from {
+          Some(to.clone())
+        } else {
+          None
+        }
+      },
+      &prev_sexp,
+    );
+    // println!("new_sexp: {}", new_sexp);
+    if new_sexp == prev_sexp {
+      // println!("substitute_sexp_subsets: looped {} times", loop_count);
+      // if sexps.len() > 1 {
+      //   sexps.pop();
+      // }
+      return sexps;
+    }
+    // loop_count += 1;
+    sexps.push(new_sexp.clone());
+    prev_sexp = new_sexp;
+  }
 }
 
 /// Returns every subexpression in the sexp that contains a var, ignoring base
@@ -259,6 +315,7 @@ fn add_sexp_subexpressions(sexp: &Sexp, subexprs: &mut BTreeMap<String, Sexp>) -
     Sexp::String(s) if is_var(s) => {
       // We won't add the variable, but we will add every subexpression
       // containing it.
+      subexprs.insert(s.to_owned(), sexp.clone());
       return true;
     }
     _ => {}
@@ -567,7 +624,7 @@ impl Prop {
   /// first pass is comparing them to each other lexicographically (although in
   /// expectation this will not take very long). The second pass is alpha
   /// renaming them.
-  pub fn new(eq: Equation, params: Vec<(Symbol, Type)>) -> Self {
+  pub fn new(eq: Equation, params: Vec<(Symbol, Type)>) -> (Self, BTreeMap<String, String>) {
     // TODO: Could probably use a more efficient data structure since iteration
     // order isn't important here.
     let param_names: BTreeSet<String> = params.iter().map(|(p, _t)| p.to_string()).collect();
@@ -605,10 +662,18 @@ impl Prop {
     // Finally, we reorder the parameters by their name.
     renamed_params.sort_by_key(|(p, _t)| p.as_str());
 
-    Self {
-      eq: Equation::new(renamed_lhs, renamed_rhs),
-      params: renamed_params,
-    }
+    let alpha_renamed_to_param = param_to_alpha_renamed
+      .iter()
+      .map(|(param, alpha)| (alpha.clone(), param.clone()))
+      .collect::<BTreeMap<_, _>>();
+
+    (
+      Self {
+        eq: Equation::new(renamed_lhs, renamed_rhs),
+        params: renamed_params,
+      },
+      alpha_renamed_to_param,
+    )
   }
 
   /// Creates a new Prop without performing any alpha normalization.
