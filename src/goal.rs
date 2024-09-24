@@ -982,13 +982,13 @@ impl<'a> Goal<'a> {
     let is_var = |v| self.local_context.contains_key(v);
     let mut rewrites = self.lemmas.clone();
     let mut lemma_rws = vec![];
-    for lhs_expr in exprs.get(&lhs_id).unwrap() {
+    for lhs_expr in &exprs[&lhs_id] {
       let lhs: Pattern<SymbolLang> = to_pattern(lhs_expr, is_var);
       // TODO: Check whether is_reducible is needed to constrain lemmas/rewrites. Probably not
       if (CONFIG.irreducible_only && self.is_reducible(lhs_expr)) || has_guard_wildcards(&lhs) {
         continue;
       }
-      for rhs_expr in exprs.get(&rhs_id).unwrap() {
+      for rhs_expr in &exprs[&rhs_id] {
         if timer.timeout() {
           return (rewrites, lemma_rws);
         }
@@ -2294,6 +2294,10 @@ impl<'a> Goal<'a> {
                 dump_eclass_exprs(&new_goal.egraph, new_goal.eq.rhs.id);
               }
               new_goals.push(new_goal);
+            } else {
+              if CONFIG.verbose {
+                println!("skipping cvecs(rippled RHS) != cvecs(RHS)");
+              }
             }
           }
         }
@@ -2342,6 +2346,10 @@ impl<'a> Goal<'a> {
                 dump_eclass_exprs(&new_goal.egraph, new_goal.eq.rhs.id);
               }
               new_goals.push(new_goal);
+            } else {
+              if CONFIG.verbose {
+                println!("skipping cvecs(LHS) != cvecs(rippled LHS)");
+              }
             }
           }
         }
@@ -3745,11 +3753,6 @@ impl<'a> LemmaProofState<'a> {
             .into_iter()
             .map(|rw_info| (rw_info.lemma_prop, rw_info.renamed_params))
             .collect::<Vec<_>>();
-          // let new_rewrite_eqs = rewrite_infos
-          //   .into_iter()
-          //   .map(|rw_info| rw_info.lemma_prop)
-          //   .collect::<Vec<_>>();
-
           let fresh_name = format!("fresh_{}_{}", new_goal.name, new_goal.egraph.total_size());
           for (new_rewrite_eq, renamed_params) in &new_rewrite_eqs {
             lemmas.extend(find_generalizations_prop(
@@ -3760,8 +3763,8 @@ impl<'a> LemmaProofState<'a> {
               fresh_name.clone(),
             ));
           }
+          lemmas.extend::<Vec<_>>(new_rewrite_eqs.into_iter().unzip::<_, _, _, Vec<_>>().0);
           let lemma_indices = lemmas_state.add_lemmas(lemmas, self.proof_depth + 1);
-          // let lemma_indices = lemmas_state.add_lemmas(new_rewrite_eqs, self.proof_depth + 1);
           related_lemmas.extend(lemma_indices);
         }
       }
