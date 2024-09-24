@@ -1405,37 +1405,43 @@ impl<'a> Goal<'a> {
       let mut ihs = vec![];
       let lhs = self.egraph.find(self.eq.lhs.id);
       let rhs = self.egraph.find(self.eq.rhs.id);
-      // TODO: use no-loops version?
-      let lhs_exprs = collect_expressions_with_loops(&self.egraph, lhs);
-      // let smallest_lhs_expr = get_smallest_expr(&lhs_exprs);
-      let rhs_exprs = collect_expressions_with_loops(&self.egraph, rhs);
-      // let smallest_rhs_expr = get_smallest_expr(&rhs_exprs);
-      for (lhs_expr, rhs_expr) in lhs_exprs.iter().cartesian_product(&rhs_exprs) {
+      // TODO: Make separate flag
+      if CONFIG.ripple_mode {
+        // Make IHs from saturated e-classes instead of initial exprs
+        let lhs_exprs = collect_expressions_with_loops(&self.egraph, lhs);
+        let rhs_exprs = collect_expressions_with_loops(&self.egraph, rhs);
+        for (lhs_expr, rhs_expr) in lhs_exprs.iter().cartesian_product(&rhs_exprs) {
+          let (lemma_rw, ih_searchers) =
+            self.make_lemma_rewrite(lhs_expr, &rhs_expr, &premises, ih_lemma_number, false);
+          if lemma_rw.is_some() {
+            if let Some((lhs_ih, rhs_ih)) = &ih_searchers {
+              ihs.push((lhs_ih.clone(), rhs_ih.clone()));
+            }
+            lemma_rw.unwrap().add_to_rewrites(&mut rewrites);
+          }
+        }
+      } else {
         // In the non-cyclic case, only use the original LHS and RHS
         // and only if no other lemmas have been added yet
         let (lemma_rw, ih_searchers) = self.make_lemma_rewrite(
-          // &self.eq.lhs.expr,
-          lhs_expr,
-          // &self.eq.rhs.expr,
-          &rhs_expr,
+          &self.eq.lhs.expr,
+          &self.eq.rhs.expr,
           &premises,
           ih_lemma_number,
           false,
         );
-        // if lemma_rw.is_none() {
-        //   println!(
-        //     "{}: {} == {}. params: {:?}",
-        //     self.name, self.eq.lhs.sexp, self.eq.rhs.sexp, self.top_level_params
-        //   );
-        //   panic!()
-        // }
+        if lemma_rw.is_none() {
+          println!(
+            "{}: {} == {}. params: {:?}",
+            self.name, self.eq.lhs.sexp, self.eq.rhs.sexp, self.top_level_params
+          );
+          panic!()
+        }
         if lemma_rw.is_some() {
           if let Some((lhs_ih, rhs_ih)) = &ih_searchers {
             ihs.push((lhs_ih.clone(), rhs_ih.clone()));
           }
-
-          let lemma_rw = lemma_rw.unwrap();
-          lemma_rw.add_to_rewrites(&mut rewrites);
+          lemma_rw.unwrap().add_to_rewrites(&mut rewrites);
         }
       }
       if self.ih.is_none() && !ihs.is_empty() {

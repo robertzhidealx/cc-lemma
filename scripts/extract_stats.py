@@ -16,8 +16,6 @@ def main():
   lemma_stats = []
   default_stats = [-1, -1, -1, -1, "Timeout"]
   # lemma_proved = 0
-  opt_uncyclic = 'optimize uncyclic'
-  opt_uncyclic_len = len(opt_uncyclic)
 
   for line in logs.splitlines():
     if line.startswith('benchmarks/'):
@@ -34,12 +32,11 @@ def main():
     if line.startswith('(uncyclic)'):
       found_lemma_stats = True
       lemma_stats = [int(num) for num in re.findall(r'\d+', line)]
-    if line.startswith(opt_uncyclic):
-      runtime = re.findall(r'\d+', line)
+    if 'uncyclic:' in line:
+      runtime = re.findall(r'\d+', line)[-1]
       assert(found_lemma_stats)
-      assert(len(runtime) == 1)
-      lemma_stats.append(int(runtime[0]))
-      lemma_stats.append("Valid" if line[opt_uncyclic_len+2:line.index("(")-1] == 'VALID' else "Invalid")
+      lemma_stats.append(int(runtime))
+      lemma_stats.append("Valid" if line[line.index(':')+2:line.index("(")-1] == 'VALID' else "Invalid")
       
   if found_lemma_stats:
     lemma_stats_collection.append(lemma_stats)
