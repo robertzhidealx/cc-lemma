@@ -1,0 +1,30 @@
+(
+  (data Bool (True False))
+  (:: True Bool)
+  (:: False Bool)
+
+  (data Nat (Z S))
+  (:: Z Nat)
+  (:: S (-> (Nat) Nat))
+
+  (:: plus (-> (Nat Nat) Nat))
+  (let plus (Z ?y) ?y)
+  (let plus ((S ?x) ?y) (S (plus ?x ?y)))
+
+  (:: times (-> (Nat Nat) Nat))
+  (let times (Z ?x) Z)
+  (let times ((S ?x) ?y) (plus (times ?x ?y) ?y))
+
+  (:: fact (-> (Nat) Nat))
+  (let fact (Z) (S Z))
+  (let fact ((S ?x)) (times (S ?x) (fact ?x)))
+
+  (:: facttail (-> (Nat Nat) Nat))
+  (let facttail (Z ?acc) ?acc)
+  (let facttail ((S ?x) ?acc) (facttail ?x (times (S ?x) ?acc)))
+
+  (=== tail_1 (x) (Nat)
+    (fact x)
+    (facttail x (S Z))
+  )
+)

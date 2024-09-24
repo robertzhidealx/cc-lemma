@@ -20,6 +20,7 @@ pub struct GoalInfo {
   pub lemma_id: usize,
   pub full_exp: String,
   pub size: usize,
+  pub au_depth: Option<usize>,
 }
 
 impl GoalInfo {
@@ -29,6 +30,17 @@ impl GoalInfo {
       lemma_id,
       full_exp: goal.full_expr.to_string(),
       size: sexp_size(&goal.full_expr.lhs) + sexp_size(&goal.full_expr.rhs),
+      au_depth: None,
+    }
+  }
+
+  pub fn new_au(goal: &Goal, lemma_id: usize, au_depth: usize) -> Self {
+    GoalInfo {
+      name: goal.name.clone(),
+      lemma_id,
+      full_exp: goal.full_expr.to_string(),
+      size: sexp_size(&goal.full_expr.lhs) + sexp_size(&goal.full_expr.rhs),
+      au_depth: Some(au_depth),
     }
   }
 }
@@ -246,11 +258,50 @@ impl GoalGraph {
     let father = node.father.clone();
     let children = node.split_children.clone().unwrap();
 
-    if children.into_iter().all(|child| {
-      // UNCOMMENT
-      // !child.name.starts_with("syntactic-decomp:") &&
-      self.get_goal(&child).status == GraphProveStatus::Valid
-    }) {
+    // let mut seen_depths = HashSet::new();
+    // let mut is_au = false;
+    // let mut all_depths_unique = true;
+    // let mut exists_proven_child = false;
+    // let mut unproven_children = vec![];
+    // if children.len() > 1 && children.iter().any(|child| child.au_depth.is_some()) {
+    //   is_au = true;
+    //   for child in &children {
+    //     assert!(child.au_depth.is_some());
+    //     let depth = child.au_depth.unwrap();
+    //     if seen_depths.contains(&depth) {
+    //       all_depths_unique = false;
+    //       break;
+    //     }
+    //     seen_depths.insert(depth);
+
+    //     if self.get_goal(child).status == GraphProveStatus::Valid {
+    //       println!("Proven: {:#?}", child);
+    //       if !exists_proven_child {
+    //         exists_proven_child = true;
+    //       }
+    //     } else {
+    //       unproven_children.push(child.clone());
+    //     }
+    //   }
+    // }
+
+    // if is_au && all_depths_unique && exists_proven_child {
+    //   if CONFIG.verbose {
+    //     println!("Proven AU goal subsumes other AU goals, short-circuiting");
+    //   }
+    //   for unproven_child in unproven_children {
+    //     println!("Subsumed: {:#?}", unproven_child);
+    //     self.get_goal_mut(&unproven_child).status = GraphProveStatus::Subsumed;
+    //   }
+    //   self.get_goal_mut(info).status = GraphProveStatus::Valid;
+    //   if father.is_some() {
+    //     self.check_split_finished(&father.unwrap());
+    //   }
+    // } else
+    if children
+      .into_iter()
+      .all(|child| self.get_goal(&child).status == GraphProveStatus::Valid)
+    {
       self.get_goal_mut(info).status = GraphProveStatus::Valid;
       if father.is_some() {
         self.check_split_finished(&father.unwrap());

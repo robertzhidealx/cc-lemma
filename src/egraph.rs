@@ -595,7 +595,6 @@ where
       // let parent_id = egraph.add(parent.clone());
       // wave_front.children = vec![parent_id];
       // let _wave_front_id = egraph.add(wave_front.clone());
-      // println!("ayo:");
       // dump_eclass_exprs(egraph, _wave_front_id);
       // **parent = wave_front;
       // egraph[eclass].nodes[idx] =

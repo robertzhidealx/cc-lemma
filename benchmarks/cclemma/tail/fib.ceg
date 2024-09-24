@@ -1,0 +1,28 @@
+(
+  (data Bool (True False))
+  (:: True Bool)
+  (:: False Bool)
+
+  (data Nat (Z S))
+  (:: Z Nat)
+  (:: S (-> (Nat) Nat))
+
+  (:: plus (-> (Nat Nat) Nat))
+  (let plus (Z ?y) ?y)
+  (let plus ((S ?x) ?y) (S (plus ?x ?y)))
+
+  (:: fib (-> (Nat) Nat))
+  (let fib (Z) Z)
+  (let fib ((S Z)) (S Z))
+  (let fib ((S (S ?n))) (plus (fib (S ?n)) (fib ?n)))
+
+  (:: fibtail (-> (Nat Nat Nat) Nat))
+  (let fibtail (Z ?a ?b) ?a)
+  (let fibtail ((S Z) ?a ?b) ?b)
+  (let fibtail ((S (S ?x)) ?a ?b) (fibtail (S ?x) ?b (plus ?a ?b)))
+
+  (=== tail_1 (x) (Nat)
+    (fib x)
+    (fibtail x Z (S Z))
+  )
+)

@@ -122,6 +122,9 @@ pub struct Args {
 
   #[clap(long = "fallback")]
   pub fallback_mode: bool,
+
+  #[clap(long = "subset-gen")]
+  pub subset_generalization: bool,
 }
 
 impl Args {
@@ -180,6 +183,7 @@ pub struct Config {
   pub reduce_proven_lemma: bool,
   pub ripple_mode: bool,
   pub fallback_mode: bool,
+  pub subset_generalization: bool,
 }
 
 impl Config {
@@ -244,6 +248,7 @@ impl Config {
       reduce_proven_lemma: args.reduce_proven_lemmas,
       ripple_mode: args.ripple_mode,
       fallback_mode: args.fallback_mode,
+      subset_generalization: args.subset_generalization,
     }
   }
 

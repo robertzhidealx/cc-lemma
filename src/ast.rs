@@ -278,9 +278,10 @@ pub fn substitute_sexp_subsets(sexp: &Sexp, from: &Sexp, to: &Sexp) -> Vec<Sexp>
     // println!("new_sexp: {}", new_sexp);
     if new_sexp == prev_sexp {
       // println!("substitute_sexp_subsets: looped {} times", loop_count);
-      // if sexps.len() > 1 {
-      //   sexps.pop();
-      // }
+      // TODO: Keep?
+      if sexps.len() > 1 {
+        sexps.pop();
+      }
       return sexps;
     }
     // loop_count += 1;
@@ -315,7 +316,9 @@ fn add_sexp_subexpressions(sexp: &Sexp, subexprs: &mut BTreeMap<String, Sexp>) -
     Sexp::String(s) if is_var(s) => {
       // We won't add the variable, but we will add every subexpression
       // containing it.
-      subexprs.insert(s.to_owned(), sexp.clone());
+      if CONFIG.subset_generalization {
+        subexprs.insert(s.to_owned(), sexp.clone());
+      }
       return true;
     }
     _ => {}
