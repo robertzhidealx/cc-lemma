@@ -13,7 +13,9 @@ cargo clean
 for file in $DIR; do
   echo $file
   # timeout $TIME_LIMIT cargo run --release -- "$file"
+  # timeout $TIME_LIMIT cargo run --release -- --no-cc-lemmas "$file"
   timeout $TIME_LIMIT cargo run --release -- --ripple "$file"
+  # timeout $TIME_LIMIT cargo run --release -- --ripple --eqsat-ih "$file"
   # timeout $TIME_LIMIT cargo run --release -- --ripple --subset-gen "$file"
   # timeout $TIME_LIMIT cargo run --release -- --ripple --fallback "$file"
   # timeout $TIME_LIMIT cargo run --release -- --ripple -p --no-proof-comments "$file"

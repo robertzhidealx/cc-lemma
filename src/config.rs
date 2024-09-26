@@ -125,6 +125,9 @@ pub struct Args {
 
   #[clap(long = "subset-gen")]
   pub subset_generalization: bool,
+
+  #[clap(long = "eqsat-ih")]
+  pub eqsat_ih: bool,
 }
 
 impl Args {
@@ -184,6 +187,7 @@ pub struct Config {
   pub ripple_mode: bool,
   pub fallback_mode: bool,
   pub subset_generalization: bool,
+  pub eqsat_ih: bool,
 }
 
 impl Config {
@@ -249,6 +253,7 @@ impl Config {
       ripple_mode: args.ripple_mode,
       fallback_mode: args.fallback_mode,
       subset_generalization: args.subset_generalization,
+      eqsat_ih: args.eqsat_ih,
     }
   }
 
