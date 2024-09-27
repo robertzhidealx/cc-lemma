@@ -2068,13 +2068,13 @@ impl<'a> Goal<'a> {
     self.egraph.analysis.cvec_analysis.saturate();
     let resolved_lhs_id = self.egraph.find(self.eq.lhs.id);
     let resolved_rhs_id = self.egraph.find(self.eq.rhs.id);
-    if CONFIG.verbose {
-      println!("LHS: ");
-      print_expressions_in_eclass(&self.egraph, resolved_lhs_id);
-      println!("RHS: ");
-      print_expressions_in_eclass(&self.egraph, resolved_rhs_id);
-      // print_all_expressions_in_egraph(&self.egraph, 7);
-    }
+    // if CONFIG.verbose {
+    //   println!("LHS: ");
+    //   print_expressions_in_eclass(&self.egraph, resolved_lhs_id);
+    //   println!("RHS: ");
+    //   print_expressions_in_eclass(&self.egraph, resolved_rhs_id);
+    //   // print_all_expressions_in_egraph(&self.egraph, 7);
+    // }
     let class_ids: Vec<Id> = self.egraph.classes().map(|c| c.id).collect();
 
     for class_1_id in &class_ids {
@@ -2296,9 +2296,9 @@ impl<'a> Goal<'a> {
             // new_goal.ih = Some((rhs_ih.clone(), rhs_ih.clone()));
             if CONFIG.verbose {
               println!("New goal:");
-              dump_eclass_exprs(&new_goal.egraph, new_goal.eq.lhs.id);
+              dump_eclass_exprs(&new_goal.egraph, new_goal.egraph.find(new_goal.eq.lhs.id));
               println!("=?=");
-              dump_eclass_exprs(&new_goal.egraph, new_goal.eq.rhs.id);
+              dump_eclass_exprs(&new_goal.egraph, new_goal.egraph.find(new_goal.eq.rhs.id));
             }
             new_goals.push(new_goal);
             // } else {
@@ -2351,9 +2351,9 @@ impl<'a> Goal<'a> {
             // new_goal.ih = Some((lhs_ih.clone(), lhs_ih.clone()));
             if CONFIG.verbose {
               println!("New goal:");
-              dump_eclass_exprs(&new_goal.egraph, new_goal.eq.lhs.id);
+              dump_eclass_exprs(&new_goal.egraph, new_goal.egraph.find(new_goal.eq.lhs.id));
               println!("=?=");
-              dump_eclass_exprs(&new_goal.egraph, new_goal.eq.rhs.id);
+              dump_eclass_exprs(&new_goal.egraph, new_goal.egraph.find(new_goal.eq.rhs.id));
             }
             new_goals.push(new_goal);
             // } else {
@@ -3753,44 +3753,33 @@ impl<'a> LemmaProofState<'a> {
       if let Some(ihs) = goal.ih.clone() {
         let lhs = goal.egraph.find(goal.eq.lhs.id);
         let rhs = goal.egraph.find(goal.eq.rhs.id);
+        let mut lemmas = vec![];
         for (lhs_ih, rhs_ih) in ihs {
           let mut ih_replacements = vec![];
           let mut cache = HashMap::new();
-          let mut weak_fert_lhs = goal.pattern_replace_in_eclass_with_analysis_help(
+          let weak_fert_lhs = goal.pattern_replace_in_eclass_with_analysis_help(
             &mut cache,
             &mut ih_replacements,
             lhs,
             &lhs_ih,
             &rhs_ih,
           );
-          // weak_fert_lhs.extend(goal.pattern_replace_in_eclass_with_analysis_help(
-          //   &mut cache,
-          //   &mut ih_replacements,
-          //   lhs,
-          //   &rhs_ih,
-          //   &lhs_ih,
-          // ));
-          weak_fert_lhs.retain(|&id| id != lhs);
-          let mut weak_fert_rhs = goal.pattern_replace_in_eclass_with_analysis_help(
+          let weak_fert_rhs = goal.pattern_replace_in_eclass_with_analysis_help(
             &mut cache,
             &mut ih_replacements,
             rhs,
-            &lhs_ih,
             &rhs_ih,
+            &lhs_ih,
           );
-          // weak_fert_rhs.extend(goal.pattern_replace_in_eclass_with_analysis_help(
-          //   &mut cache,
-          //   &mut ih_replacements,
-          //   rhs,
-          //   &rhs_ih,
-          //   &lhs_ih,
-          // ));
-          weak_fert_rhs.retain(|&id| id != rhs);
-          for (lhs, rhs) in weak_fert_lhs.iter().cartesian_product(&weak_fert_rhs) {
-            let mut lemmas = vec![];
+          for (weak_fert_lhs, weak_fert_rhs) in
+            weak_fert_lhs.iter().cartesian_product(&weak_fert_rhs)
+          {
+            if *weak_fert_lhs == lhs && *weak_fert_rhs == rhs {
+              continue;
+            }
             let (_, rewrite_infos) = goal.make_lemma_rewrites_from_all_exprs(
-              *lhs,
-              *rhs,
+              *weak_fert_lhs,
+              *weak_fert_rhs,
               vec![],
               timer,
               lemmas_state,
@@ -3814,24 +3803,23 @@ impl<'a> LemmaProofState<'a> {
               lemmas.extend(generalized_lemmas);
             }
             lemmas.extend::<Vec<_>>(new_rewrite_eqs.into_iter().unzip::<_, _, _, Vec<_>>().0);
-            // println!(
-            //   "Weak fert lemmas: {:#?}",
-            //   lemmas.iter().map(|l| l.to_string()).collect::<Vec<_>>()
-            // );
-            let lemma_indices = lemmas_state.add_lemmas(lemmas, self.proof_depth + 1);
-            related_lemmas.extend(lemma_indices);
           }
         }
+        // println!(
+        //   "Weak fert lemmas: {:#?}",
+        //   lemmas.iter().map(|l| l.to_string()).collect::<Vec<_>>()
+        // );
+        let lemma_indices = lemmas_state.add_lemmas(lemmas, self.proof_depth + 1);
+        related_lemmas.extend(lemma_indices);
       }
     }
 
     let mut ripple_out_success = false;
     if CONFIG.ripple_mode {
-      // goal.egraph = goal_egraph_snapshot;
       if let Some(new_goals) = goal.ripple_out() {
         ripple_out_success = true;
+        let mut lemmas = vec![];
         for new_goal in new_goals {
-          let mut lemmas = vec![];
           let (_, rewrite_infos) = new_goal.make_lemma_rewrites_from_all_exprs(
             new_goal.eq.lhs.id,
             new_goal.eq.rhs.id,
@@ -3857,11 +3845,10 @@ impl<'a> LemmaProofState<'a> {
             ));
           }
           lemmas.extend::<Vec<_>>(new_rewrite_eqs.into_iter().unzip::<_, _, _, Vec<_>>().0);
-          let lemma_indices = lemmas_state.add_lemmas(lemmas, self.proof_depth + 1);
-          related_lemmas.extend(lemma_indices);
         }
+        let lemma_indices = lemmas_state.add_lemmas(lemmas, self.proof_depth + 1);
+        related_lemmas.extend(lemma_indices);
       }
-      // goal.egraph = goal_egraph_saturated;
     }
 
     if CONFIG.ripple_mode {
@@ -3913,6 +3900,9 @@ impl<'a> LemmaProofState<'a> {
       if let Some(new_goals) = goal.semantic_decomp(timer) {
         for new_goal in new_goals {
           let mut lemmas = vec![];
+          let generalized_new_goals =
+            new_goal.find_generalized_goals(&new_goal.find_blocking(timer).1);
+          lemmas.extend(generalized_new_goals);
           let (_rewrites, rewrite_infos) = new_goal.make_lemma_rewrites_from_all_exprs(
             new_goal.eq.lhs.id,
             new_goal.eq.rhs.id,
@@ -3923,7 +3913,6 @@ impl<'a> LemmaProofState<'a> {
             false,
             true,
           );
-          // TODO: Also generalize here?
           let new_rewrite_eqs = rewrite_infos
             .into_iter()
             .map(|rw_info| (rw_info.lemma_prop, rw_info.renamed_params))
