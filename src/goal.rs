@@ -3763,13 +3763,13 @@ impl<'a> LemmaProofState<'a> {
             &lhs_ih,
             &rhs_ih,
           );
-          weak_fert_lhs.extend(goal.pattern_replace_in_eclass_with_analysis_help(
-            &mut cache,
-            &mut ih_replacements,
-            lhs,
-            &rhs_ih,
-            &lhs_ih,
-          ));
+          // weak_fert_lhs.extend(goal.pattern_replace_in_eclass_with_analysis_help(
+          //   &mut cache,
+          //   &mut ih_replacements,
+          //   lhs,
+          //   &rhs_ih,
+          //   &lhs_ih,
+          // ));
           weak_fert_lhs.retain(|&id| id != lhs);
           let mut weak_fert_rhs = goal.pattern_replace_in_eclass_with_analysis_help(
             &mut cache,
@@ -3778,13 +3778,13 @@ impl<'a> LemmaProofState<'a> {
             &lhs_ih,
             &rhs_ih,
           );
-          weak_fert_rhs.extend(goal.pattern_replace_in_eclass_with_analysis_help(
-            &mut cache,
-            &mut ih_replacements,
-            rhs,
-            &rhs_ih,
-            &lhs_ih,
-          ));
+          // weak_fert_rhs.extend(goal.pattern_replace_in_eclass_with_analysis_help(
+          //   &mut cache,
+          //   &mut ih_replacements,
+          //   rhs,
+          //   &rhs_ih,
+          //   &lhs_ih,
+          // ));
           weak_fert_rhs.retain(|&id| id != rhs);
           for (lhs, rhs) in weak_fert_lhs.iter().cartesian_product(&weak_fert_rhs) {
             let mut lemmas = vec![];
@@ -3981,39 +3981,38 @@ impl<'a> LemmaProofState<'a> {
       related_lemmas.extend(lemma_indices);
     }
 
-    // TODO
-    if true && CONFIG.ripple_mode {
-      let mut lemmas = vec![];
-      let (_, rewrite_infos) = goal.make_lemma_rewrites_from_all_exprs(
-        goal.eq.lhs.id,
-        goal.eq.rhs.id,
-        vec![],
-        timer,
-        lemmas_state,
-        false,
-        false,
-        true,
-      );
-      let new_rewrite_eqs = rewrite_infos
-        .into_iter()
-        .map(|rw_info| (rw_info.lemma_prop, rw_info.renamed_params))
-        .collect::<Vec<_>>();
+    // if CONFIG.ripple_mode {
+    //   let mut lemmas = vec![];
+    //   let (_, rewrite_infos) = goal.make_lemma_rewrites_from_all_exprs(
+    //     goal.eq.lhs.id,
+    //     goal.eq.rhs.id,
+    //     vec![],
+    //     timer,
+    //     lemmas_state,
+    //     false,
+    //     false,
+    //     true,
+    //   );
+    //   let new_rewrite_eqs = rewrite_infos
+    //     .into_iter()
+    //     .map(|rw_info| (rw_info.lemma_prop, rw_info.renamed_params))
+    //     .collect::<Vec<_>>();
 
-      let fresh_name = format!("fresh_{}_{}", goal.name, goal.egraph.total_size());
-      for (new_rewrite_eq, renamed_params) in &new_rewrite_eqs {
-        lemmas.extend(find_generalizations_prop(
-          new_rewrite_eq,
-          goal.global_search_state.context,
-          &goal.local_context,
-          renamed_params,
-          fresh_name.clone(),
-        ));
-      }
-      if lemmas.len() > 1 {
-        let lemma_indices = lemmas_state.add_lemmas(lemmas, self.proof_depth + 1);
-        related_lemmas.extend(lemma_indices);
-      }
-    }
+    //   let fresh_name = format!("fresh_{}_{}", goal.name, goal.egraph.total_size());
+    //   for (new_rewrite_eq, renamed_params) in &new_rewrite_eqs {
+    //     lemmas.extend(find_generalizations_prop(
+    //       new_rewrite_eq,
+    //       goal.global_search_state.context,
+    //       &goal.local_context,
+    //       renamed_params,
+    //       fresh_name.clone(),
+    //     ));
+    //   }
+    //   if lemmas.len() > 1 {
+    //     let lemma_indices = lemmas_state.add_lemmas(lemmas, self.proof_depth + 1);
+    //     related_lemmas.extend(lemma_indices);
+    //   }
+    // }
 
     if (!CONFIG.ripple_mode && CONFIG.cc_lemmas)
       || (CONFIG.ripple_mode && CONFIG.fallback_mode && !ripple_out_success)
