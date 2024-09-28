@@ -2269,46 +2269,46 @@ impl<'a> Goal<'a> {
               }
               continue;
             }
-            // if let Some(true) = cvecs_equal(
-            //   &self.egraph.analysis.cvec_analysis,
-            //   &self.egraph[rhs].data.cvec_data,
-            //   &self.egraph[rippled_rhs].data.cvec_data,
-            // ) {
-            if CONFIG.verbose {
-              println!("Rippled RHS:");
-              dump_eclass_exprs(&self.egraph, rippled_rhs);
+            if let Some(true) = cvecs_equal(
+              &self.egraph.analysis.cvec_analysis,
+              &self.egraph[rhs].data.cvec_data,
+              &self.egraph[rippled_rhs].data.cvec_data,
+            ) {
+              if CONFIG.verbose {
+                println!("Rippled RHS:");
+                dump_eclass_exprs(&self.egraph, rippled_rhs);
+              }
+              let rippled_rhs_exprs = collect_expressions_with_loops(&self.egraph, rippled_rhs);
+              let smallest_rippled_rhs_expr = get_smallest_expr(&rippled_rhs_exprs);
+              let mut new_goal = self.clone();
+              new_goal.name = format!(
+                "rippled_rhs_{}={}",
+                smallest_rippled_rhs_expr, new_goal.eq.rhs.expr
+              );
+              new_goal.full_expr =
+                Equation::from_exprs(&smallest_rippled_rhs_expr, &new_goal.eq.rhs.expr);
+              // new_goal.eq.lhs.sexp = symbolic_expressions::parser::parse_str(
+              //   smallest_rippled_rhs_expr.to_string().as_str(),
+              // )
+              // .unwrap();
+              new_goal.eq.lhs.expr = smallest_rippled_rhs_expr;
+              new_goal.eq.lhs.id = rippled_rhs;
+              // new_goal.ih = Some((rhs_ih.clone(), rhs_ih.clone()));
+              if CONFIG.verbose {
+                println!("New goal:");
+                dump_eclass_exprs(&new_goal.egraph, new_goal.egraph.find(new_goal.eq.lhs.id));
+                println!("=?=");
+                dump_eclass_exprs(&new_goal.egraph, new_goal.egraph.find(new_goal.eq.rhs.id));
+              }
+              new_goals.push(new_goal);
+              // } else {
+              //   if CONFIG.verbose {
+              //     println!("skipping cvecs(rippled RHS) != cvecs(RHS):");
+              //     dump_eclass_exprs(&self.egraph, rippled_rhs);
+              //     println!("=?=");
+              //     dump_eclass_exprs(&self.egraph, rhs);
+              //   }
             }
-            let rippled_rhs_exprs = collect_expressions_with_loops(&self.egraph, rippled_rhs);
-            let smallest_rippled_rhs_expr = get_smallest_expr(&rippled_rhs_exprs);
-            let mut new_goal = self.clone();
-            new_goal.name = format!(
-              "rippled_rhs_{}={}",
-              smallest_rippled_rhs_expr, new_goal.eq.rhs.expr
-            );
-            new_goal.full_expr =
-              Equation::from_exprs(&smallest_rippled_rhs_expr, &new_goal.eq.rhs.expr);
-            // new_goal.eq.lhs.sexp = symbolic_expressions::parser::parse_str(
-            //   smallest_rippled_rhs_expr.to_string().as_str(),
-            // )
-            // .unwrap();
-            new_goal.eq.lhs.expr = smallest_rippled_rhs_expr;
-            new_goal.eq.lhs.id = rippled_rhs;
-            // new_goal.ih = Some((rhs_ih.clone(), rhs_ih.clone()));
-            if CONFIG.verbose {
-              println!("New goal:");
-              dump_eclass_exprs(&new_goal.egraph, new_goal.egraph.find(new_goal.eq.lhs.id));
-              println!("=?=");
-              dump_eclass_exprs(&new_goal.egraph, new_goal.egraph.find(new_goal.eq.rhs.id));
-            }
-            new_goals.push(new_goal);
-            // } else {
-            //   if CONFIG.verbose {
-            //     println!("skipping cvecs(rippled RHS) != cvecs(RHS):");
-            //     dump_eclass_exprs(&self.egraph, rippled_rhs);
-            //     println!("=?=");
-            //     dump_eclass_exprs(&self.egraph, rhs);
-            //   }
-            // }
           }
         }
 
@@ -2324,46 +2324,46 @@ impl<'a> Goal<'a> {
               }
               continue;
             }
-            // if let Some(true) = cvecs_equal(
-            //   &self.egraph.analysis.cvec_analysis,
-            //   &self.egraph[lhs].data.cvec_data,
-            //   &self.egraph[rippled_lhs].data.cvec_data,
-            // ) {
-            if CONFIG.verbose {
-              println!("Rippled LHS:");
-              dump_eclass_exprs(&self.egraph, rippled_lhs);
+            if let Some(true) = cvecs_equal(
+              &self.egraph.analysis.cvec_analysis,
+              &self.egraph[lhs].data.cvec_data,
+              &self.egraph[rippled_lhs].data.cvec_data,
+            ) {
+              if CONFIG.verbose {
+                println!("Rippled LHS:");
+                dump_eclass_exprs(&self.egraph, rippled_lhs);
+              }
+              let rippled_lhs_exprs = collect_expressions_with_loops(&self.egraph, rippled_lhs);
+              let smallest_rippled_lhs_expr = get_smallest_expr(&rippled_lhs_exprs);
+              let mut new_goal = self.clone();
+              new_goal.name = format!(
+                "rippled_lhs_{}={}",
+                new_goal.eq.lhs.expr, smallest_rippled_lhs_expr
+              );
+              new_goal.full_expr =
+                Equation::from_exprs(&new_goal.eq.lhs.expr, &smallest_rippled_lhs_expr);
+              // new_goal.eq.lhs.sexp = symbolic_expressions::parser::parse_str(
+              //   smallest_rippled_lhs_expr.to_string().as_str(),
+              // )
+              // .unwrap();
+              new_goal.eq.rhs.expr = smallest_rippled_lhs_expr;
+              new_goal.eq.rhs.id = rippled_lhs;
+              // new_goal.ih = Some((lhs_ih.clone(), lhs_ih.clone()));
+              if CONFIG.verbose {
+                println!("New goal:");
+                dump_eclass_exprs(&new_goal.egraph, new_goal.egraph.find(new_goal.eq.lhs.id));
+                println!("=?=");
+                dump_eclass_exprs(&new_goal.egraph, new_goal.egraph.find(new_goal.eq.rhs.id));
+              }
+              new_goals.push(new_goal);
+              // } else {
+              //   if CONFIG.verbose {
+              //     println!("skipping cvecs(LHS) != cvecs(rippled LHS):");
+              //     dump_eclass_exprs(&self.egraph, lhs);
+              //     println!("=?=");
+              //     dump_eclass_exprs(&self.egraph, rippled_lhs);
+              //   }
             }
-            let rippled_lhs_exprs = collect_expressions_with_loops(&self.egraph, rippled_lhs);
-            let smallest_rippled_lhs_expr = get_smallest_expr(&rippled_lhs_exprs);
-            let mut new_goal = self.clone();
-            new_goal.name = format!(
-              "rippled_lhs_{}={}",
-              new_goal.eq.lhs.expr, smallest_rippled_lhs_expr
-            );
-            new_goal.full_expr =
-              Equation::from_exprs(&new_goal.eq.lhs.expr, &smallest_rippled_lhs_expr);
-            // new_goal.eq.lhs.sexp = symbolic_expressions::parser::parse_str(
-            //   smallest_rippled_lhs_expr.to_string().as_str(),
-            // )
-            // .unwrap();
-            new_goal.eq.rhs.expr = smallest_rippled_lhs_expr;
-            new_goal.eq.rhs.id = rippled_lhs;
-            // new_goal.ih = Some((lhs_ih.clone(), lhs_ih.clone()));
-            if CONFIG.verbose {
-              println!("New goal:");
-              dump_eclass_exprs(&new_goal.egraph, new_goal.egraph.find(new_goal.eq.lhs.id));
-              println!("=?=");
-              dump_eclass_exprs(&new_goal.egraph, new_goal.egraph.find(new_goal.eq.rhs.id));
-            }
-            new_goals.push(new_goal);
-            // } else {
-            //   if CONFIG.verbose {
-            //     println!("skipping cvecs(LHS) != cvecs(rippled LHS):");
-            //     dump_eclass_exprs(&self.egraph, lhs);
-            //     println!("=?=");
-            //     dump_eclass_exprs(&self.egraph, rippled_lhs);
-            //   }
-            // }
           }
         }
       }
@@ -2501,24 +2501,19 @@ impl<'a> Goal<'a> {
           }
           new_children = temp;
         }
-        // self.egraph.analysis.cvec_analysis.current_timestamp += 1;
+        self.egraph.analysis.cvec_analysis.current_timestamp += 1;
         for id_list in new_children {
           let enode = SymbolLang::new(lhs_enode.op, id_list);
-          // let _type = self
-          //   .global_search_state
-          //   .context
-          //   .get(&enode.op)
-          //   .or_else(|| self.local_context.get(&enode.op))
-          //   .and_then(|t| Some(t.args_ret().1));
+          let new_id_type = self
+            .global_search_state
+            .context
+            .get(&enode.op)
+            .or_else(|| self.local_context.get(&enode.op))
+            .unwrap()
+            .args_ret()
+            .1;
           let new_id = self.egraph.add(enode);
-          // TODO:
-          // self.add_cvec_for_class(id, ty);
-          // if let Some(t) = _type {
-          //   if CONFIG.verbose {
-          //     println!("type: {t}");
-          //   }
-          //   self.add_cvec_for_class(new_id, &t);
-          // }
+          self.add_cvec_for_class(new_id, &new_id_type);
           if false && CONFIG.verbose {
             println!("New ID:");
             dump_eclass_exprs(&self.egraph, new_id);
@@ -3812,6 +3807,7 @@ impl<'a> LemmaProofState<'a> {
         let lemma_indices = lemmas_state.add_lemmas(lemmas, self.proof_depth + 1);
         related_lemmas.extend(lemma_indices);
       }
+      goal.egraph.analysis.cvec_analysis.saturate();
     }
 
     let mut ripple_out_success = false;
