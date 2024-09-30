@@ -4000,7 +4000,8 @@ impl<'a> LemmaProofState<'a> {
     }
 
     let mut ripple_out_success = false;
-    if CONFIG.ripple_mode {
+    // TODO: This is in effect a lesser version of weakly_fertilize; disabled for now
+    if false && CONFIG.ripple_mode {
       if let Some(new_goals) = goal.ripple_out() {
         ripple_out_success = true;
         let mut lemmas = vec![];
