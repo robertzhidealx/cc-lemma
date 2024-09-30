@@ -177,9 +177,11 @@ impl SearchCondition<SymbolLang, CycleggAnalysis> for Soundness {
         let new_id = subst.get(v)?;
         // If the actual argument of the lemma is not canonical, give up
         let new_canonical = CanonicalFormAnalysis::extract_canonical(egraph, *new_id)?;
+        // println!("new canonical: {}", new_canonical);
         // Same for the original argument:
         // it might not be canonical if it's inconsistent, in which case there's no point applying any lemmas
         let orig_canonical = CanonicalFormAnalysis::extract_canonical(egraph, *orig_id)?;
+        // println!("orig canonical: {}", orig_canonical);
         Some((*x, orig_canonical, new_canonical))
       })
       .collect::<Option<Vec<(Symbol, Expr, Expr)>>>();
@@ -2229,6 +2231,86 @@ impl<'a> Goal<'a> {
   //   }
   // }
 
+  fn weakly_fertilize(
+    &mut self,
+    lemmas_state: &mut LemmasState,
+    timer: &Timer,
+  ) -> Option<Vec<Prop>> {
+    if CONFIG.verbose {
+      println!("=== weakly_fertilize ===");
+    }
+    let ihs = self.ih.clone()?;
+    let lhs = self.egraph.find(self.eq.lhs.id);
+    let rhs = self.egraph.find(self.eq.rhs.id);
+    let mut lemmas = vec![];
+    for (lhs_ih, rhs_ih) in ihs {
+      let mut ih_replacements = vec![];
+      let mut cache = HashMap::new();
+      let weak_fert_lhs = self.pattern_replace_in_eclass_with_analysis_help_exhaustive(
+        &mut cache,
+        &mut ih_replacements,
+        lhs,
+        &lhs_ih,
+        &rhs_ih,
+      );
+      let mut cache = HashMap::new();
+      let weak_fert_rhs = self.pattern_replace_in_eclass_with_analysis_help_exhaustive(
+        &mut cache,
+        &mut ih_replacements,
+        rhs,
+        &rhs_ih,
+        &lhs_ih,
+      );
+      for (weak_fert_lhs, weak_fert_rhs) in weak_fert_lhs.iter().cartesian_product(&weak_fert_rhs) {
+        if *weak_fert_lhs == lhs && *weak_fert_rhs == rhs {
+          continue;
+        }
+        let (_, rewrite_infos) = self.make_lemma_rewrites_from_all_exprs(
+          *weak_fert_lhs,
+          *weak_fert_rhs,
+          vec![],
+          timer,
+          lemmas_state,
+          false,
+          false,
+          true,
+        );
+        let new_rewrite_eqs = rewrite_infos
+          .into_iter()
+          .map(|rw_info| (rw_info.lemma_prop, rw_info.renamed_params))
+          .collect::<Vec<_>>();
+        let fresh_name = format!("fresh_{}_{}", self.name, self.egraph.total_size());
+        for (new_rewrite_eq, renamed_params) in &new_rewrite_eqs {
+          // println!("new_rewrite_eq: {new_rewrite_eq}");
+          let generalized_lemmas = find_generalizations_prop(
+            new_rewrite_eq,
+            self.global_search_state.context,
+            &self.local_context,
+            renamed_params,
+            fresh_name.clone(),
+          );
+          // for prop in &generalized_lemmas {
+          //   println!("generalized: {prop}");
+          // }
+          if generalized_lemmas.is_empty() {
+            lemmas.push(new_rewrite_eq.clone());
+          }
+          lemmas.extend(generalized_lemmas);
+        }
+      }
+    }
+    // println!(
+    //   "Weak fert lemmas: {:#?}",
+    //   lemmas.iter().map(|l| l.to_string()).collect::<Vec<_>>()
+    // );
+    self.egraph.analysis.cvec_analysis.saturate();
+    if lemmas.is_empty() {
+      None
+    } else {
+      Some(lemmas)
+    }
+  }
+
   fn ripple_out(&mut self) -> Option<Vec<Goal<'a>>> {
     if CONFIG.verbose {
       println!("=== ripple_out ===");
@@ -2425,6 +2507,14 @@ impl<'a> Goal<'a> {
     rhs_ih: &ConditionalSearcher<SoundnessWithType, Pattern<SymbolLang>>,
   ) -> HashSet<Id> {
     if let Some(rippled_rhs) = cache.get(&lhs) {
+      if false && CONFIG.verbose {
+        println!("Cache hit:");
+        dump_eclass_exprs(&self.egraph, lhs);
+        println!("->");
+        for id in rippled_rhs {
+          dump_eclass_exprs(&self.egraph, *id);
+        }
+      }
       return rippled_rhs.clone();
     }
     cache.insert(lhs, HashSet::from_iter([lhs]));
@@ -2461,9 +2551,9 @@ impl<'a> Goal<'a> {
     } else {
       let limit = 5;
       let mut j = 0;
-      if false && CONFIG.verbose {
-        println!("No match, go over LHS enodes");
-      }
+      // if false && CONFIG.verbose {
+      //   println!("No match, go over LHS enodes");
+      // }
       for lhs_enode in lhs_eclass.nodes.iter() {
         let mut new_children = vec![vec![]];
         if false && CONFIG.verbose {
@@ -2525,6 +2615,129 @@ impl<'a> Goal<'a> {
           j += 1;
         }
       }
+    }
+
+    cache.get(&lhs).unwrap().clone()
+  }
+
+  fn pattern_replace_in_eclass_with_analysis_help_exhaustive(
+    &mut self,
+    cache: &mut HashMap<Id, HashSet<Id>>,
+    ih_replacement_vec: &mut Vec<Id>,
+    lhs: Id,
+    lhs_ih: &ConditionalSearcher<SoundnessWithType, Pattern<SymbolLang>>,
+    rhs_ih: &ConditionalSearcher<SoundnessWithType, Pattern<SymbolLang>>,
+  ) -> HashSet<Id> {
+    if let Some(rippled_rhs) = cache.get(&lhs) {
+      if false && CONFIG.verbose {
+        println!("Cache hit:");
+        dump_eclass_exprs(&self.egraph, lhs);
+        println!("->");
+        for id in rippled_rhs {
+          dump_eclass_exprs(&self.egraph, *id);
+        }
+      }
+      return rippled_rhs.clone();
+    }
+    cache.insert(lhs, HashSet::from_iter([lhs]));
+    let lhs_eclass = self.egraph[lhs].clone();
+    self.egraph.rebuild();
+    if false && CONFIG.verbose {
+      println!("Search for {} in LHS e-class:", lhs_ih.searcher);
+      dump_eclass_exprs(&self.egraph, lhs);
+    }
+    if let Some(matches) = lhs_ih.search_eclass(&self.egraph, lhs) {
+      // println!("Found match:");
+      for subst in matches.substs {
+        // if CONFIG.verbose {
+        // lhs_ih.searcher.vars().into_iter().for_each(|var| {
+        //   if subst.get(var).is_none() {
+        //     println!("{}: none", var)
+        //   } else {
+        //     println!(
+        //       "{}: {}",
+        //       var,
+        //       self.egraph.id_to_expr(*subst.get(var).unwrap())
+        //     )
+        //   }
+        // });
+        // }
+        let new_id = self.add_instantiation_with_var_if_necessary(&rhs_ih.searcher, subst);
+        if false && CONFIG.verbose {
+          println!("After adding instantiation:");
+          dump_eclass_exprs(&self.egraph, new_id);
+        }
+        cache.get_mut(&lhs).unwrap().insert(new_id);
+      }
+      ih_replacement_vec.push(lhs);
+    }
+    // else {
+    let limit = 5;
+    let mut j = 0;
+    // if false && CONFIG.verbose {
+    //   println!("No match, go over LHS enodes");
+    // }
+    for lhs_enode in lhs_eclass.nodes.iter() {
+      let mut new_children = vec![vec![]];
+      if false && CONFIG.verbose {
+        println!("LHS enode: {lhs_enode}");
+        println!("Go over enode children");
+      }
+      for &child in &lhs_enode.children {
+        if false && CONFIG.verbose {
+          println!("child:");
+          dump_eclass_exprs(&self.egraph, child);
+        }
+        let mut temp = vec![];
+        let rippled_ids = self.pattern_replace_in_eclass_with_analysis_help(
+          cache,
+          ih_replacement_vec,
+          child,
+          lhs_ih,
+          rhs_ih,
+        );
+        if false && CONFIG.verbose {
+          println!("Rippled IHs:");
+          for id in &rippled_ids {
+            dump_eclass_exprs(&self.egraph, *id);
+          }
+        }
+        for id_list in new_children {
+          // println!("Go over rippled IDs");
+          for id in &rippled_ids {
+            // println!("rippled ID:");
+            // dump_eclass_exprs(&self.egraph, *id);
+            let mut id_list_mod = id_list.clone();
+            id_list_mod.push(id.clone());
+            temp.push(id_list_mod);
+          }
+        }
+        new_children = temp;
+      }
+      self.egraph.analysis.cvec_analysis.current_timestamp += 1;
+      for id_list in new_children {
+        let enode = SymbolLang::new(lhs_enode.op, id_list);
+        let new_id_type = self
+          .global_search_state
+          .context
+          .get(&enode.op)
+          .or_else(|| self.local_context.get(&enode.op))
+          .unwrap()
+          .args_ret()
+          .1;
+        let new_id = self.egraph.add(enode);
+        self.add_cvec_for_class(new_id, &new_id_type);
+        if false && CONFIG.verbose {
+          println!("New ID:");
+          dump_eclass_exprs(&self.egraph, new_id);
+        }
+        cache.get_mut(&lhs).unwrap().insert(new_id);
+        if j >= limit {
+          break;
+        }
+        j += 1;
+      }
+      // }
     }
 
     cache.get(&lhs).unwrap().clone()
@@ -3744,70 +3957,11 @@ impl<'a> LemmaProofState<'a> {
     // goal.egraph.rebuild();
 
     if CONFIG.ripple_mode {
-      let mut goal = goal.clone();
-      if let Some(ihs) = goal.ih.clone() {
-        let lhs = goal.egraph.find(goal.eq.lhs.id);
-        let rhs = goal.egraph.find(goal.eq.rhs.id);
-        let mut lemmas = vec![];
-        for (lhs_ih, rhs_ih) in ihs {
-          let mut ih_replacements = vec![];
-          let mut cache = HashMap::new();
-          let weak_fert_lhs = goal.pattern_replace_in_eclass_with_analysis_help(
-            &mut cache,
-            &mut ih_replacements,
-            lhs,
-            &lhs_ih,
-            &rhs_ih,
-          );
-          let weak_fert_rhs = goal.pattern_replace_in_eclass_with_analysis_help(
-            &mut cache,
-            &mut ih_replacements,
-            rhs,
-            &rhs_ih,
-            &lhs_ih,
-          );
-          for (weak_fert_lhs, weak_fert_rhs) in
-            weak_fert_lhs.iter().cartesian_product(&weak_fert_rhs)
-          {
-            if *weak_fert_lhs == lhs && *weak_fert_rhs == rhs {
-              continue;
-            }
-            let (_, rewrite_infos) = goal.make_lemma_rewrites_from_all_exprs(
-              *weak_fert_lhs,
-              *weak_fert_rhs,
-              vec![],
-              timer,
-              lemmas_state,
-              false,
-              false,
-              true,
-            );
-            let new_rewrite_eqs = rewrite_infos
-              .into_iter()
-              .map(|rw_info| (rw_info.lemma_prop, rw_info.renamed_params))
-              .collect::<Vec<_>>();
-            let fresh_name = format!("fresh_{}_{}", goal.name, goal.egraph.total_size());
-            for (new_rewrite_eq, renamed_params) in &new_rewrite_eqs {
-              let generalized_lemmas = find_generalizations_prop(
-                new_rewrite_eq,
-                goal.global_search_state.context,
-                &goal.local_context,
-                renamed_params,
-                fresh_name.clone(),
-              );
-              lemmas.extend(generalized_lemmas);
-            }
-            lemmas.extend::<Vec<_>>(new_rewrite_eqs.into_iter().unzip::<_, _, _, Vec<_>>().0);
-          }
-        }
-        // println!(
-        //   "Weak fert lemmas: {:#?}",
-        //   lemmas.iter().map(|l| l.to_string()).collect::<Vec<_>>()
-        // );
+      let lemmas = goal.weakly_fertilize(lemmas_state, timer);
+      if let Some(lemmas) = lemmas {
         let lemma_indices = lemmas_state.add_lemmas(lemmas, self.proof_depth + 1);
         related_lemmas.extend(lemma_indices);
       }
-      goal.egraph.analysis.cvec_analysis.saturate();
     }
 
     let mut ripple_out_success = false;
@@ -4105,6 +4259,14 @@ impl<'a> ProofState<'a> {
           .proven_lemmas
           .insert(lemma_proof_state.prop.clone());
         if let Some(rw) = lemma_proof_state.rw.as_ref() {
+          if rw.lemma_prop.to_string()
+            == "forall v0: Tree. (Succ (maximum v0)) =?= (maximum (tf3 v0))"
+          {
+            return;
+          }
+          // if rw.lemma_number == 43 {
+          //   return;
+          // }
           if CONFIG.verbose {
             if let Some(rw) = rw.lhs_to_rhs.as_ref() {
               println!("Adding rewrite rule: {}", rw.0);

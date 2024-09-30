@@ -1,8 +1,8 @@
-file1_path = "optimization_simple18_cclemma_full.result"
-file2_path = "optimization_simple19.result"
+file1_path = "bruh'.result"
+file2_path = "bruh.result"
 # file2_path = "optimization_simple18_us.result"
 
-output_path = "optimization_diff1.result"
+output_path = "tmp_diff.result"
 
 def extract_lines(file_path):
   conjs = []
