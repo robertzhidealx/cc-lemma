@@ -1528,6 +1528,7 @@ impl<'a> Goal<'a> {
   fn add_scrutinee(&mut self, var: Symbol, ty: &Type, depth: usize) {
     if let Ok((dt, _)) = ty.datatype() {
       if self.global_search_state.env.contains_key(&Symbol::from(dt)) {
+        // println!("Adding scrutinee: {} : {}", var, ty);
         self.scrutinees.push_back(Scrutinee::new_var(var, depth));
       }
     }
@@ -2235,15 +2236,21 @@ impl<'a> Goal<'a> {
     &mut self,
     lemmas_state: &mut LemmasState,
     timer: &Timer,
-  ) -> Option<Vec<Prop>> {
+  ) -> Option<Vec<Goal<'a>>> {
     if CONFIG.verbose {
       println!("=== weakly_fertilize ===");
     }
-    let ihs = self.ih.clone()?;
+    if self.ih.is_none() {
+      if CONFIG.verbose {
+        println!("*** weakly_fertilize ***");
+      }
+      return None;
+    }
     let lhs = self.egraph.find(self.eq.lhs.id);
     let rhs = self.egraph.find(self.eq.rhs.id);
-    let mut lemmas = vec![];
-    for (lhs_ih, rhs_ih) in ihs {
+    // let mut lemmas = vec![];
+    let mut new_goals = vec![];
+    for (lhs_ih, rhs_ih) in &self.ih.clone().unwrap() {
       let mut ih_replacements = vec![];
       let mut cache = HashMap::new();
       let weak_fert_lhs = self.pattern_replace_in_eclass_with_analysis_help_exhaustive(
@@ -2289,26 +2296,44 @@ impl<'a> Goal<'a> {
             renamed_params,
             fresh_name.clone(),
           );
-          // for prop in &generalized_lemmas {
-          //   println!("generalized: {prop}");
-          // }
-          if generalized_lemmas.is_empty() {
-            lemmas.push(new_rewrite_eq.clone());
+          for prop in &generalized_lemmas {
+            // println!("generalized: {prop}");
+            let new_goal = Goal::top(
+              &format!("{}_weak-fert{}", self.name, new_goals.len()),
+              &prop,
+              &None,
+              self.global_search_state,
+            );
+            new_goals.push(new_goal);
           }
-          lemmas.extend(generalized_lemmas);
+          if generalized_lemmas.is_empty() {
+            let new_goal = Goal::top(
+              &format!("{}_weak-fert{}", self.name, new_goals.len()),
+              &new_rewrite_eq,
+              &None,
+              self.global_search_state,
+            );
+            new_goals.push(new_goal);
+            // lemmas.push(new_rewrite_eq.clone());
+          }
+          // lemmas.extend(generalized_lemmas);
         }
       }
     }
-    // println!(
-    //   "Weak fert lemmas: {:#?}",
-    //   lemmas.iter().map(|l| l.to_string()).collect::<Vec<_>>()
-    // );
     self.egraph.analysis.cvec_analysis.saturate();
-    if lemmas.is_empty() {
+    if CONFIG.verbose {
+      println!("*** weakly_fertilize ***");
+    }
+    if new_goals.is_empty() {
       None
     } else {
-      Some(lemmas)
+      Some(new_goals)
     }
+    // if lemmas.is_empty() {
+    //   None
+    // } else {
+    //   Some(lemmas)
+    // }
   }
 
   fn ripple_out(&mut self) -> Option<Vec<Goal<'a>>> {
@@ -2594,16 +2619,16 @@ impl<'a> Goal<'a> {
         self.egraph.analysis.cvec_analysis.current_timestamp += 1;
         for id_list in new_children {
           let enode = SymbolLang::new(lhs_enode.op, id_list);
-          let new_id_type = self
-            .global_search_state
-            .context
-            .get(&enode.op)
-            .or_else(|| self.local_context.get(&enode.op))
-            .unwrap()
-            .args_ret()
-            .1;
+          // let new_id_type = self
+          //   .global_search_state
+          //   .context
+          //   .get(&enode.op)
+          //   .or_else(|| self.local_context.get(&enode.op))
+          //   .unwrap()
+          //   .args_ret()
+          //   .1;
           let new_id = self.egraph.add(enode);
-          self.add_cvec_for_class(new_id, &new_id_type);
+          // self.add_cvec_for_class(new_id, &new_id_type);
           if false && CONFIG.verbose {
             println!("New ID:");
             dump_eclass_exprs(&self.egraph, new_id);
@@ -2717,16 +2742,16 @@ impl<'a> Goal<'a> {
       self.egraph.analysis.cvec_analysis.current_timestamp += 1;
       for id_list in new_children {
         let enode = SymbolLang::new(lhs_enode.op, id_list);
-        let new_id_type = self
-          .global_search_state
-          .context
-          .get(&enode.op)
-          .or_else(|| self.local_context.get(&enode.op))
-          .unwrap()
-          .args_ret()
-          .1;
+        // let new_id_type = self
+        //   .global_search_state
+        //   .context
+        //   .get(&enode.op)
+        //   .or_else(|| self.local_context.get(&enode.op))
+        //   .unwrap()
+        //   .args_ret()
+        //   .1;
         let new_id = self.egraph.add(enode);
-        self.add_cvec_for_class(new_id, &new_id_type);
+        // self.add_cvec_for_class(new_id, &new_id_type);
         if false && CONFIG.verbose {
           println!("New ID:");
           dump_eclass_exprs(&self.egraph, new_id);
@@ -3957,11 +3982,21 @@ impl<'a> LemmaProofState<'a> {
     // goal.egraph.rebuild();
 
     if CONFIG.ripple_mode {
-      let lemmas = goal.weakly_fertilize(lemmas_state, timer);
-      if let Some(lemmas) = lemmas {
-        let lemma_indices = lemmas_state.add_lemmas(lemmas, self.proof_depth + 1);
-        related_lemmas.extend(lemma_indices);
+      // TODO: May need to be further adjusted
+      let new_goals = goal.weakly_fertilize(lemmas_state, timer);
+      if let Some(new_goals) = new_goals {
+        let new_goal_infos = new_goals
+          .iter()
+          .map(|new_goal| GoalInfo::new(new_goal, info.lemma_id))
+          .collect();
+        self.goals.extend(new_goals);
+        return Some((related_lemmas, new_goal_infos));
       }
+      // let lemmas = goal.weakly_fertilize(lemmas_state, timer);
+      // if let Some(lemmas) = lemmas {
+      //   let lemma_indices = lemmas_state.add_lemmas(lemmas, self.proof_depth + 1);
+      //   related_lemmas.extend(lemma_indices);
+      // }
     }
 
     let mut ripple_out_success = false;
@@ -4050,9 +4085,9 @@ impl<'a> LemmaProofState<'a> {
       if let Some(new_goals) = goal.semantic_decomp(timer) {
         for new_goal in new_goals {
           let mut lemmas = vec![];
-          let generalized_new_goals =
-            new_goal.find_generalized_goals(&new_goal.find_blocking(timer).1);
-          lemmas.extend(generalized_new_goals);
+          // let generalized_new_goals =
+          //   new_goal.find_generalized_goals(&new_goal.find_blocking(timer).1);
+          // lemmas.extend(generalized_new_goals);
           let (_rewrites, rewrite_infos) = new_goal.make_lemma_rewrites_from_all_exprs(
             new_goal.eq.lhs.id,
             new_goal.eq.rhs.id,
@@ -4161,7 +4196,6 @@ impl<'a> LemmaProofState<'a> {
       related_lemmas.extend(lemma_indices);
     }
 
-    // println!("Goal scrutinees: {:?}", goal.scrutinees);
     if let Some(scrutinee) = goal.next_scrutinee(blocking_vars) {
       if CONFIG.verbose {
         println!(
